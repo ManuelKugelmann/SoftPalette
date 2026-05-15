@@ -360,6 +360,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button id="exportPng">⬇ png</button>
     </div>
   </section>
+
+  <section class="card">
+    <h2>hues preview</h2>
+    <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
+  </section>
 </aside>
 
 </main>
@@ -842,10 +847,10 @@ function buildLut(){
 
 // Recompute LUT, upload to GPU. Resolves slider→effective clamps via envelope.
 function recomputeLut(){
-  if (state.palette.length === 0){ state.lutData = null; return; }
+  if (state.palette.length === 0){ state.lutData = null; renderHuePreview(); return; }
   const t0 = performance.now();
   const built = buildLut();
-  if (!built){ state.lutData = null; return; }
+  if (!built){ state.lutData = null; renderHuePreview(); return; }
   const {atlas, nSynthetic, syntheticSeeds} = built;
   const N = LUT_N;
   const gl = state.gl;
@@ -860,6 +865,7 @@ function recomputeLut(){
   state.lutData = { atlas, N, buildMs: performance.now() - t0, nSynthetic, syntheticSeeds };
   updateLutStatus();
   renderSwatches();  // synth swatches reflect latest extension settings
+  renderHuePreview();
 }
 
 function updateLutStatus(){
@@ -1525,23 +1531,6 @@ function makeHuePickerImage(){
   }
   ctx.putImageData(img, 0, 0);
 
-  // Annotate: hue tick marks every 30° along bottom; S/V labels on right.
-  ctx.font = '10px JetBrains Mono, monospace';
-  ctx.textAlign = 'center';
-  for (let deg = 0; deg < 360; deg += 30){
-    const x = (deg / 360) * W;
-    // Adapt label color: dark hues (blue/purple) need light text.
-    ctx.fillStyle = (deg >= 200 && deg <= 290) ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)';
-    ctx.fillRect(x, H - 16, 1, 6);
-    ctx.fillText(`${deg}°`, x, H - 4);
-  }
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillText('S=0', W - 4, 12);
-  ctx.fillText('S=1 V=1', W - 4, half + 4);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.fillText('V=0', W - 4, H - 20);
-
   return cv;
 }
 
@@ -1673,6 +1662,115 @@ function oklabToLinearJS(L,a,b){
     -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
     -0.0041960863*l - 0.7034186147*m + 1.7076147010*s,
   ];
+}
+
+/* =========================================================
+   HUE PREVIEW — small palette-applied hue×value strip in the
+   right column. Updates after every LUT rebuild via CPU
+   trilinear sample of the LUT atlas.
+   ========================================================= */
+const HUE_PREVIEW_W = 280, HUE_PREVIEW_H = 70;
+let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
+
+function buildHuePreviewSrc(){
+  const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
+  const buf = new Uint8ClampedArray(W * H * 4);
+  const half = H / 2;
+  // hsv → sRGB byte (same as the main hues image, sans annotations).
+  function hsvToRgb(h, s, v){
+    const c = v * s, hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1)      { r = c; g = x; }
+    else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; }
+    else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; }
+    else             { r = c; b = x; }
+    const m = v - c;
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  for (let y = 0; y < H; y++){
+    let s, v;
+    if (y < half){ s = y / (half - 1); v = 1; }
+    else         { s = 1; v = 1 - (y - half) / (H - 1 - half); }
+    for (let x = 0; x < W; x++){
+      const h = (x / W) * 360;
+      const [r, g, b] = hsvToRgb(h, s, v);
+      const i = (y * W + x) * 4;
+      buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
+    }
+  }
+  return buf;
+}
+
+// CPU trilinear sample of the LUT atlas. Atlas layout: x = li*N + ai, y = bi
+// in an N²×N RGBA byte texture.
+function sampleLutCpu(atlas, N, sr, sg, sb){
+  const lr = srgbToLinearC(sr/255);
+  const lg = srgbToLinearC(sg/255);
+  const lb = srgbToLinearC(sb/255);
+  let l = 0.4122214708*lr + 0.5363325363*lg + 0.0514459929*lb;
+  let m = 0.2119034982*lr + 0.6806995451*lg + 0.1073969566*lb;
+  let s = 0.0883024619*lr + 0.2817188376*lg + 0.6299787005*lb;
+  l = Math.cbrt(l); m = Math.cbrt(m); s = Math.cbrt(s);
+  const L  = 0.2104542553*l + 0.7936177850*m - 0.0040720468*s;
+  const a  = 1.9779984951*l - 2.4285922050*m + 0.4505937099*s;
+  const bo = 0.0259040371*l + 0.7827717662*m - 0.8086757660*s;
+  const Lf = Math.max(0, Math.min(1, L)) * (N - 1);
+  const Af = Math.max(0, Math.min(1, (a  + LUT_AB_RANGE) / (2 * LUT_AB_RANGE))) * (N - 1);
+  const Bf = Math.max(0, Math.min(1, (bo + LUT_AB_RANGE) / (2 * LUT_AB_RANGE))) * (N - 1);
+  const l0 = Math.floor(Lf), l1 = Math.min(N-1, l0+1), lt = Lf - l0;
+  const a0 = Math.floor(Af), a1 = Math.min(N-1, a0+1), at = Af - a0;
+  const b0 = Math.floor(Bf), b1 = Math.min(N-1, b0+1), bt = Bf - b0;
+  const stride = N*N;
+  function px(li, ai, bi){
+    const x = li*N + ai;
+    return (bi * stride + x) * 4;
+  }
+  const p000 = px(l0,a0,b0), p001 = px(l0,a0,b1);
+  const p010 = px(l0,a1,b0), p011 = px(l0,a1,b1);
+  const p100 = px(l1,a0,b0), p101 = px(l1,a0,b1);
+  const p110 = px(l1,a1,b0), p111 = px(l1,a1,b1);
+  function blend(p, q, t){ return atlas[p]*(1-t) + atlas[q]*t; }
+  const out = [0,0,0];
+  for (let ch = 0; ch < 3; ch++){
+    const c00 = blend(p000+ch, p001+ch, bt);
+    const c01 = blend(p010+ch, p011+ch, bt);
+    const c10 = blend(p100+ch, p101+ch, bt);
+    const c11 = blend(p110+ch, p111+ch, bt);
+    const c0  = c00*(1-at) + c01*at;
+    const c1  = c10*(1-at) + c11*at;
+    out[ch]   = c0*(1-lt) + c1*lt;
+  }
+  return out;
+}
+
+function renderHuePreview(){
+  const cv = document.getElementById('huePreview');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
+  const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
+  const img = ctx.createImageData(W, H);
+  const dst = img.data;
+  if (!state.lutData || state.palette.length === 0){
+    // No LUT — show the raw hues source as-is.
+    dst.set(_huePreviewSrc);
+  } else {
+    const atlas = state.lutData.atlas;
+    const N = state.lutData.N;
+    const src = _huePreviewSrc;
+    for (let i = 0; i < W * H; i++){
+      const o = i * 4;
+      const [r, g, b] = sampleLutCpu(atlas, N, src[o], src[o+1], src[o+2]);
+      dst[o]   = r;
+      dst[o+1] = g;
+      dst[o+2] = b;
+      dst[o+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
 }
 
 /* =========================================================
@@ -2133,6 +2231,7 @@ function init(){
 
   // Boot with a procedural default image so the tool is alive on first paint.
   loadDefaultImage();
+  renderHuePreview();
 }
 
 document.addEventListener('DOMContentLoaded', init);
