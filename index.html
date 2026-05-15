@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-15T18:21:15Z">
+<meta name="build" content="2026-05-15T20:30:00Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -253,6 +253,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="pastel">pastel</button>
       <button data-preset="rgb">r·g·b</button>
       <button data-preset="quake">quake</button>
+      <button data-preset="quake·min" title="Reduced quake palette — near-duplicate hues collapsed">quake·min</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>palette <span class="badge"><span id="paletteCount">0</span>/32</span></h2>
+    <div class="swatches" id="swatches"></div>
+    <div class="row tight">
+      <button id="addColor">+ add</button>
+      <button id="extractColors">extract from image</button>
+      <button id="clearPalette">clear</button>
     </div>
   </section>
 
@@ -271,16 +282,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 <!-- RIGHT -->
 <aside class="right">
-  <section class="card">
-    <h2>palette <span class="badge"><span id="paletteCount">0</span>/32</span></h2>
-    <div class="swatches" id="swatches"></div>
-    <div class="row tight">
-      <button id="addColor">+ add</button>
-      <button id="extractColors">extract from image</button>
-      <button id="clearPalette">clear</button>
-    </div>
-  </section>
-
   <section class="card">
     <h2>lut params</h2>
     <div class="row full" style="margin-bottom:8px">
@@ -354,7 +355,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 </main>
 
-<footer>palette·hue·lut · single file · gh-pages ready</footer>
+<footer>palette·hue·lut · single file · gh-pages ready · <span style="color:var(--txd)">Manuel Kugelmann — Bitcraft IT Consulting</span></footer>
 
 <script>
 'use strict';
@@ -375,6 +376,11 @@ const PRESETS = {
   // Quake 1 canonical 256-color palette: max-chroma per hue bin + scrag-green
   // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries total.
   'quake':       ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
+  // Reduced quake: one representative per hue bin, near-duplicates collapsed.
+  // Drops the second scrag (#c7c337), the bright-yellow trio's redundants
+  // (#dfab27,#efcb1f), two of three dark greens, near-white cyan, second
+  // dark blue (#8b8bcb), and the mauve neutral (#9f7f97).
+  'quake·min':   ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
 };
 
 const state = {

@@ -18,8 +18,8 @@ Palette-based color grading via 3D LUT. Smooth-snap any image to your palette's 
 | Section | What it does |
 |---|---|
 | **image** | Drop, paste (Ctrl+V), click to browse, or pick a built-in test image |
-| **presets** | Curated palette presets — click to apply |
-| **palette** | Swatch grid. Edit hex, delete, add new, extract from current image, or clear |
+| **presets** | Curated palette presets — click to apply. `quake·min` is a hue-deduped subset of the full Quake palette |
+| **palette** | Swatch grid (left column). Edit hex, delete, add new, extract from current image, or clear |
 | **lut params · presets row** | One-click bundles: `default`, `+50`, `+100`, `+200` (envelope boost) |
 | **stripe thickness** | Width of each palette anchor's "stripe" in hue space (radians) |
 | **smoothness** | Iterations of blur+restamp during LUT build (higher = smoother gradients) |
