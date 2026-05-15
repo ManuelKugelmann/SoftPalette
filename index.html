@@ -251,6 +251,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="noir">noir·neon</button>
       <button data-preset="pastel">pastel</button>
       <button data-preset="rgb">r·g·b</button>
+      <button data-preset="office" title="MS-Office accent style: teal, yellow, berry, navy, lime">office</button>
+      <button data-preset="solarized" title="Ethan Schoonover's 8 accent hues">solarized</button>
+      <button data-preset="nord" title="Nord — frost + aurora">nord</button>
+      <button data-preset="dracula" title="Dracula — vivid neon accents">dracula</button>
       <button data-preset="FullQuake">FullQuake</button>
       <button data-preset="SlimQuake" title="Reduced quake palette — near-duplicate hues collapsed">SlimQuake</button>
     </div>
@@ -372,6 +376,14 @@ const PRESETS = {
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
   'pastel':      ['#f4c8d8','#c8e0f4','#d8f4c8','#f4e8c8','#e0c8f4'],
   'rgb':         ['#e83a3a','#3ae83a','#3a3ae8'],
+  // MS-Office accent style: teal/yellow/berry/navy/lime
+  'office':      ['#1abc9c','#f1c40f','#c2185b','#1a237e','#2ecc71'],
+  // Solarized (Ethan Schoonover) — 8 accent hues, base16 omitted
+  'solarized':   ['#b58900','#cb4b16','#dc322f','#d33682','#6c71c4','#268bd2','#2aa198','#859900'],
+  // Nord — frost (cool blues) + aurora (warm accents)
+  'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
+  // Dracula — vivid neon accents
+  'dracula':     ['#ff79c6','#bd93f9','#8be9fd','#50fa7b','#f1fa8c','#ffb86c','#ff5555','#6272a4'],
   // Quake 1 canonical 256-color palette: max-chroma per hue bin + scrag-green
   // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries total.
   'FullQuake':   ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
