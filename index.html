@@ -251,6 +251,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="noir">noir·neon</button>
       <button data-preset="pastel">pastel</button>
       <button data-preset="rgb">r·g·b</button>
+      <button data-preset="white" title="Single white anchor — desaturates to B&W">white</button>
+      <button data-preset="black" title="Single black anchor — desaturates to B&W">black</button>
       <button data-preset="office" title="MS-Office accent style: teal, yellow, berry, navy, lime">office</button>
       <button data-preset="solarized" title="Ethan Schoonover's 8 accent hues">solarized</button>
       <button data-preset="nord" title="Nord — frost + aurora">nord</button>
@@ -294,7 +296,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutpreset="boost200">+200</button>
     </div>
     <div class="slider">
-      <div class="lbl"><span>stripe thickness (rad)</span><span class="v" id="vStripe">0.040</span></div>
+      <div class="lbl"><span>stripe thickness (radians)</span><span class="v" id="vStripe">0.040</span></div>
       <input type="range" id="stripe" min="0.02" max="0.6" step="0.005" value="0.04">
     </div>
     <div class="slider">
@@ -314,12 +316,16 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="cfloorL" min="0" max="0.2" step="0.005" value="0.01">
     </div>
     <div class="slider">
-      <div class="lbl"><span>chroma ceiling <span style="color:var(--txdd)" id="cceilNote">(per-seed)</span></span><span class="v" id="vCCeil">0.40</span></div>
+      <div class="lbl"><span>chroma ceiling</span><span class="v" id="vCCeil">0.40</span></div>
       <input type="range" id="cceil" min="0.05" max="0.4" step="0.005" value="0.40">
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
       <input type="checkbox" id="paletteEnvelope" checked>
       <span>envelope <span style="color:var(--txdd)">cap chroma per seed</span></span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:4px;cursor:pointer">
+      <input type="checkbox" id="paletteEnvelopeFloor">
+      <span>envelope floor <span style="color:var(--txdd)">lift chroma to envelope</span></span>
     </label>
     <div class="slider" id="envBoostWrap" style="margin-top:6px">
       <div class="lbl"><span>envelope boost</span><span class="v" id="vEnvBoost">+0%</span></div>
@@ -338,7 +344,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <span>extend palette <span style="color:var(--txdd)">fill hue gaps</span></span>
     </label>
     <div class="slider" id="extendGapWrap" style="margin-top:6px">
-      <div class="lbl"><span>gap threshold (rad)</span><span class="v" id="vExtendGap">0.50</span></div>
+      <div class="lbl"><span>gap threshold (radians)</span><span class="v" id="vExtendGap">0.50</span></div>
       <input type="range" id="extendGap" min="0.20" max="3.14" step="0.05" value="0.50">
     </div>
     <div class="slider" id="extendMutednessWrap" style="margin-top:6px">
@@ -376,6 +382,9 @@ const PRESETS = {
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
   'pastel':      ['#f4c8d8','#c8e0f4','#d8f4c8','#f4e8c8','#e0c8f4'],
   'rgb':         ['#e83a3a','#3ae83a','#3a3ae8'],
+  // Achromatic anchors — both produce B&W desat (C=0 collapses all hues)
+  'white':       ['#ffffff'],
+  'black':       ['#000000'],
   // MS-Office accent style: teal/yellow/berry/navy/lime
   'office':      ['#1abc9c','#f1c40f','#c2185b','#1a237e','#2ecc71'],
   // Solarized (Ethan Schoonover) — 8 accent hues, base16 omitted
@@ -407,6 +416,7 @@ const state = {
     lFloor: 0.01, lCeil: 0.99,  // stripe stamp clamps
     cFloor: 0.01, cCeil: 0.40,
     paletteEnvelope: true,
+    paletteEnvelopeFloor: false,  // lift chroma floor to palette envelope per hue
     envelopeBoost: 0,
     lBlurRatio: 0.3,            // L-axis blur weight (0=none, 1=isotropic with AB)
     lutStrength: 1.0,           // 0=identity passthrough, 1=full LUT (sRGB-space mix)
@@ -582,10 +592,13 @@ function hueDist(h1, h2){
 // p contains: lFloor, lCeil, cFloor, cCeil (clamps).
 // seedCMax is the per-call effective chroma ceiling (resolved by caller from
 // either the global cCeil or the smooth palette envelope, depending on toggle).
-function stampLut(L_cell, C_cell, seed_h, seedCMax, p){
+// seedCMin is the per-call effective chroma floor (0 unless the envelope-floor
+// toggle is on, in which case it's the envelope value at this hue).
+function stampLut(L_cell, C_cell, seed_h, seedCMin, seedCMax, p){
   const L_out = Math.max(p.lFloor, Math.min(p.lCeil, L_cell));
   const cMax  = Math.min(p.cCeil, seedCMax);
-  const C_out = Math.max(p.cFloor, Math.min(cMax, C_cell));
+  const cMin  = Math.min(cMax, Math.max(p.cFloor, seedCMin));
+  const C_out = Math.max(cMin, Math.min(cMax, C_cell));
   return [L_out, C_out * Math.cos(seed_h), C_out * Math.sin(seed_h)];
 }
 
@@ -733,8 +746,13 @@ function buildLut(){
   // ramps smoothly between adjacent palette anchors instead of stepping.
   // envelopeBoost (percent) inflates the envelope by (1 + boost/100); the
   // global cCeil inside stampLut still bounds the result.
-  const cEnvFn = p.paletteEnvelope ? buildHueEnvelope(seeds, stripeRad * 4) : null;
-  const capAt = h => cEnvFn ? cEnvFn(h) * boost : Infinity;
+  // Build envelope if either ceiling or floor toggles need it.
+  const envNeeded = p.paletteEnvelope || p.paletteEnvelopeFloor;
+  const cEnvFn   = envNeeded ? buildHueEnvelope(seeds, stripeRad * 4) : null;
+  const capAt    = h => (p.paletteEnvelope && cEnvFn) ? cEnvFn(h) * boost : Infinity;
+  // Floor uses the unboosted envelope so it sits at the palette's actual chroma
+  // (a separate dial from the boosted ceiling — there's a usable range between).
+  const floorAt  = h => (p.paletteEnvelopeFloor && cEnvFn) ? cEnvFn(h) : 0;
 
   // Allocate LUT (Float32: L, a, b per cell)
   const total = N*N*N*3;
@@ -756,7 +774,7 @@ function buildLut(){
           const d = hueDist(h_cell, seeds[k].h);
           if (d < bestD){ bestD = d; best = seeds[k]; }
         }
-        const out = stampLut(L_cell, C_cell, best.h, capAt(best.h), stamp_p);
+        const out = stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
         const idx = ((li*N + bi)*N + ai)*3;
         data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
       }
@@ -784,7 +802,7 @@ function buildLut(){
             if (d < bestD){ bestD = d; best = s; }
           }
           if (best){
-            const out = stampLut(L_cell, C_cell, best.h, capAt(best.h), stamp_p);
+            const out = stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
             const idx = ((li*N + bi)*N + ai)*3;
             data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
           }
@@ -1955,10 +1973,10 @@ function init(){
 
   // LUT params presets — capture full LUT param state.
   const lutPresets = {
-    'default':  {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  envelopeBoost:0,   lBlurRatio:0.30},
-    'boost50':  {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  envelopeBoost:50,  lBlurRatio:0.30},
-    'boost100': {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  envelopeBoost:100, lBlurRatio:0.30},
-    'boost200': {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  envelopeBoost:200, lBlurRatio:0.30},
+    'default':  {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  paletteEnvelopeFloor:false, envelopeBoost:0,   lBlurRatio:0.30},
+    'boost50':  {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  paletteEnvelopeFloor:false, envelopeBoost:50,  lBlurRatio:0.30},
+    'boost100': {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  paletteEnvelopeFloor:false, envelopeBoost:100, lBlurRatio:0.30},
+    'boost200': {stripeThickness:0.04, smoothness:4, lFloor:0.01, lCeil:0.99, cFloor:0.01, cCeil:0.40, paletteEnvelope:true,  paletteEnvelopeFloor:false, envelopeBoost:200, lBlurRatio:0.30},
   };
   const sliderMap = {
     stripeThickness: ['stripe',     'vStripe',     v => v.toFixed(3)],
@@ -1978,6 +1996,7 @@ function init(){
       document.getElementById(lbl).textContent = fmt(state.params[k]);
     }
     document.getElementById('paletteEnvelope').checked = state.params.paletteEnvelope;
+    document.getElementById('paletteEnvelopeFloor').checked = state.params.paletteEnvelopeFloor;
     document.getElementById('envBoost').value = state.params.envelopeBoost;
     document.getElementById('vEnvBoost').textContent = '+' + state.params.envelopeBoost.toFixed(0) + '%';
     refreshEnvUI();
@@ -1990,10 +2009,8 @@ function init(){
   // Palette envelope checkbox: when on, cCeil per stamp is min(slider, seed.C).
   // The cceil slider is repurposed as a hard upper bound rather than the cap.
   const envCb = document.getElementById('paletteEnvelope');
-  const cceilNote = document.getElementById('cceilNote');
   const envBoostWrap = document.getElementById('envBoostWrap');
   function refreshEnvUI(){
-    cceilNote.textContent = state.params.paletteEnvelope ? '(per-seed)' : '(global)';
     envBoostWrap.style.opacity = state.params.paletteEnvelope ? '1' : '0.4';
     envBoostWrap.style.pointerEvents = state.params.paletteEnvelope ? 'auto' : 'none';
   }
@@ -2001,6 +2018,13 @@ function init(){
   envCb.addEventListener('change', () => {
     state.params.paletteEnvelope = envCb.checked;
     refreshEnvUI();
+    scheduleLutRebuild();
+  });
+
+  const envFloorCb = document.getElementById('paletteEnvelopeFloor');
+  envFloorCb.checked = state.params.paletteEnvelopeFloor;
+  envFloorCb.addEventListener('change', () => {
+    state.params.paletteEnvelopeFloor = envFloorCb.checked;
     scheduleLutRebuild();
   });
 
