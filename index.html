@@ -251,8 +251,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="noir">noir·neon</button>
       <button data-preset="pastel">pastel</button>
       <button data-preset="rgb">r·g·b</button>
-      <button data-preset="quake">quake</button>
-      <button data-preset="quake·min" title="Reduced quake palette — near-duplicate hues collapsed">quake·min</button>
+      <button data-preset="FullQuake">FullQuake</button>
+      <button data-preset="SlimQuake" title="Reduced quake palette — near-duplicate hues collapsed">SlimQuake</button>
     </div>
   </section>
 
@@ -366,7 +366,7 @@ const MAX_PAL = 32;
 const MAX_DIM = 2048;
 
 const PRESETS = {
-  'teal-orange': ['#0a3a48','#2c7782','#e8a05e','#c44a2e'],
+  'teal-orange': ['#0a3a48','#2c7782','#3ab088','#e8a05e','#c44a2e'],
   'moebius':     ['#e6c8a0','#7ca6c8','#3a4a78','#c46a4a','#5a8a5a'],
   'ghibli':      ['#a8c8e0','#5e8a5e','#e8d8a0','#c46a4a','#2c4a5a'],
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
@@ -374,12 +374,12 @@ const PRESETS = {
   'rgb':         ['#e83a3a','#3ae83a','#3a3ae8'],
   // Quake 1 canonical 256-color palette: max-chroma per hue bin + scrag-green
   // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries total.
-  'quake':       ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
+  'FullQuake':   ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
   // Reduced quake: one representative per hue bin, near-duplicates collapsed.
   // Drops the second scrag (#c7c337), the bright-yellow trio's redundants
   // (#dfab27,#efcb1f), two of three dark greens, near-white cyan, second
   // dark blue (#8b8bcb), and the mauve neutral (#9f7f97).
-  'quake·min':   ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
+  'SlimQuake':   ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
 };
 
 const state = {
