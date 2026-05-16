@@ -288,8 +288,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- CENTER -->
 <section class="center">
   <div id="imageTabs" class="tabs">
-    <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
     <button id="hueImage"       class="tab" title="Hue × Lightness gradient — at-a-glance palette coverage test">hues</button>
+    <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
     <button id="photoImage"     class="tab" title="Procedural still-life (apples on wood)">still-life</button>
     <button id="landscapeImage" class="tab" title="Procedural landscape — atmospheric depth, greens">landscape</button>
     <button id="animeImage"     class="tab" title="Procedural anime-style scene — sakura, cel-shaded mountains">anime</button>
@@ -343,6 +343,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image C</span></span><span class="v" id="vCRange">0.50</span></div>
       <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>luma look <span style="color:var(--txdd)">L→hue bias from palette (teal-orange style)</span></span><span class="v" id="vLumaLook">0.00</span></div>
+      <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>reach <span style="color:var(--txdd)">desat beyond this Lab dist to nearest anchor</span></span><span class="v" id="vReach">0.25</span></div>
@@ -462,6 +466,8 @@ const state = {
   lutTex: null, lutTex2: null, lutFbo: null, lutN: 0,
   // Seed data texture (RGBA32F, 1 row × MAX_PAL cols, rgb = OkLab, a = strength)
   seedTex: null,
+  // Luma-look curve (RGBA32F, 16×1): palette's L-conditional mean (a, b)
+  lumaTex: null,
   // Build telemetry (for status line)
   lutBuildMs: 0,
   params: {
@@ -477,6 +483,11 @@ const state = {
     lTol: 0.5,           // σL — L axis falloff
     abTol: 0.2,          // σab — A/B axes falloff (OkLab radius scale)
     softness: 4,         // IDW power exponent; 1=linear, ∞=hard nearest
+    // L↔hue correlation ("luma look"): pre-shifts each cell's (a, b) toward the
+    // palette's L-conditional mean hue before IDW. 0 = off, 1 = full shift to
+    // L-mean. Captures the teal-orange-style "cool shadows, warm highlights"
+    // automatically from the palette's L→(a,b) profile.
+    lumaLook: 0.0,
     // Per-axis blend back toward the input cell's own L/C — 0 snaps fully to
     // anchor, 1 passes input through unchanged (old-algorithm hue-snap behavior).
     // Lets the image's lightness/chroma structure survive the palette mapping
@@ -505,7 +516,7 @@ const state = {
   // Which sample-image/preset button is currently "active". Cleared when the
   // user drops a custom image or edits the palette so the UI reflects truth.
   // Initial values mirror the boot defaults (sunset image, teal-orange palette).
-  selectedImageBtn: 'resetImage',
+  selectedImageBtn: 'hueImage',
   selectedPresetBtn: 'teal-orange',
 };
 
@@ -695,10 +706,21 @@ function packSeeds(seeds){
   return buf;
 }
 
-// CPU IDW — mirrors FS_LUT_BUILD: scale-free softness, chroma-preserving
-// rescale, per-axis blend toward input cell L and C, rejection envelope.
-function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach){
+// CPU IDW — mirrors FS_LUT_BUILD: luma pre-shift, scale-free softness, chroma-
+// preserving rescale, per-axis blend toward input cell L and C, rejection.
+function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook){
   if (seeds.length === 0) return [L, a, b];
+  // Luma-look pre-shift: lerp (a, b) toward palette's L-conditional mean.
+  // lumaCurve is the precomputed 16×4 Float32 buffer (rg per bin), or null.
+  if (lumaCurve && lumaLook > 0){
+    const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
+    const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
+    const t = f - i0;
+    const ea = lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t;
+    const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
+    a = a + lumaLook * (ea - a);
+    b = b + lumaLook * (eb - b);
+  }
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
   const halfP = softness * 0.5;
@@ -806,6 +828,53 @@ function uploadSeeds(packed){
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_PAL, 1, gl.RGBA, gl.FLOAT, packed);
 }
 
+// Luma-look curve: 16×1 RGBA32F holding palette's L-conditional mean (a, b).
+// At each L bin, weighted-average all seed anchors with a Gaussian centered on
+// L_target. The teal-orange palette produces a curve that goes from (negative a,
+// negative b) at low L to (positive a, positive b) at high L — cool→warm with L.
+// Used by the build shader to pre-shift each cell's (a, b) toward the palette's
+// expected L-conditional hue, scaled by uLumaLook.
+const LUMA_BINS = 16;
+function computeLumaCurve(seeds){
+  const buf = new Float32Array(LUMA_BINS * 4);
+  if (seeds.length === 0) return buf;
+  const sigma = 0.12;  // L-axis Gaussian width
+  const inv2s2 = 1 / (2 * sigma * sigma);
+  for (let i = 0; i < LUMA_BINS; i++){
+    const Ltgt = i / (LUMA_BINS - 1);
+    let sumW = 1e-12, sumA = 0, sumB = 0;
+    for (const s of seeds){
+      const dL = Ltgt - s.L;
+      const w = Math.exp(-dL * dL * inv2s2) * s.strength;
+      sumW += w;
+      sumA += w * s.a;
+      sumB += w * s.b;
+    }
+    buf[i * 4 + 0] = sumA / sumW;
+    buf[i * 4 + 1] = sumB / sumW;
+  }
+  return buf;
+}
+function ensureLumaTexture(){
+  const gl = state.gl;
+  if (state.lumaTex) return;
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, LUMA_BINS, 1, 0, gl.RGBA, gl.FLOAT, null);
+  // LINEAR sampling gives free linear interpolation between bins.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  state.lumaTex = tex;
+}
+function uploadLumaCurve(curve){
+  const gl = state.gl;
+  ensureLumaTexture();
+  gl.bindTexture(gl.TEXTURE_2D, state.lumaTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, LUMA_BINS, 1, gl.RGBA, gl.FLOAT, curve);
+}
+
 // Write the exact seed Lab into the nearest LUT cell, per seed. Used as
 // the closing step of each blur iteration so anchor cells survive smoothing
 // (without this, repeated blur diffuses anchor values into their neighborhoods).
@@ -850,6 +919,10 @@ function recomputeLut(){
 
   const t0 = performance.now();
   uploadSeeds(packSeeds(seeds));
+  // The luma curve is computed from REAL palette anchors only — the
+  // L↔hue correlation is what the user picked, not anything synth seeds added.
+  const realSeeds = seeds.filter(s => !s.synthetic);
+  uploadLumaCurve(computeLumaCurve(realSeeds.length ? realSeeds : seeds));
   ensureLutTexture(N);
 
   const prog = state.programs.lutBuild;
@@ -869,6 +942,11 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uCRange'),  state.params.cRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),   state.params.reach);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+  // Bind luma-curve texture (unit 2). LINEAR sampling gives smooth L→(a,b).
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, state.lumaTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLumaCurve'), 2);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLumaLook'), state.params.lumaLook);
   const uZLoc = gl.getUniformLocation(prog, 'uZ');
 
   // FBO is reused across builds; (re)attached per layer below.
@@ -1045,6 +1123,8 @@ uniform float uLRange;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCRange;        // 0 = snap chroma to anchor, 1 = passthrough cell C
 uniform float uReach;         // anchor rejection radius in absolute OkLab units
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
+uniform sampler2D uLumaCurve; // 16×1 RGBA32F: rg = palette mean (a, b) at L
+uniform float uLumaLook;      // 0 = no shift; 1 = full pre-shift to L-mean hue
 
 void main(){
   float N    = uN;
@@ -1054,6 +1134,16 @@ void main(){
   float L = li / (N - 1.0);
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
+
+  // Luma-look pre-shift: pull this cell's (a, b) toward the palette's
+  // L-conditional mean hue. LINEAR sampling interpolates across L bins
+  // naturally. uLumaLook=0 → no shift, =1 → cell sits at the palette's
+  // expected hue for its L. Captures teal-orange-style L↔hue correlation:
+  // the dark cells get pulled toward palette's dark-anchor hue, bright cells
+  // toward bright-anchor hue, regardless of the cell's input hue.
+  vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
+  vec2 ab = mix(vec2(a, b), expected, uLumaLook);
+  a = ab.x; b = ab.y;
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
@@ -2027,12 +2117,15 @@ function renderHuePreview(){
     ctx.putImageData(img, 0, 0);
     return;
   }
-  const { lTol, abTol, softness, lRange, cRange, reach } = state.params;
+  const { lTol, abTol, softness, lRange, cRange, reach, lumaLook } = state.params;
+  // Recompute curve from real anchors only — mirrors the GPU build path.
+  const realSeeds = seeds.filter(s => !s.synthetic);
+  const lumaCurve = lumaLook > 0 ? computeLumaCurve(realSeeds.length ? realSeeds : seeds) : null;
   const src = _huePreviewSrc;
   for (let i = 0; i < W * H; i++){
     const o = i * 4;
     const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
-    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange, reach);
+    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange, reach, lumaCurve, lumaLook);
     const lin = oklabToLinearJS(oL, oa, ob);
     const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
     const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
@@ -2446,6 +2539,7 @@ function init(){
   })();
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
+  bindLutSlider('lumaLook',   'vLumaLook',   'lumaLook',   v => v.toFixed(2));
   bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
@@ -2475,6 +2569,7 @@ function init(){
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     cRange:     ['cRange',     'vCRange',     v => v.toFixed(2)],
     reach:      ['reach',      'vReach',      v => v.toFixed(2)],
+    lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
   };
   function applyLutPreset(name){
@@ -2597,8 +2692,9 @@ function init(){
     });
   }
 
-  // Boot with a procedural default image so the tool is alive on first paint.
-  loadDefaultImage();
+  // Boot with the hue picker — best for inspecting the palette mapping
+  // at a glance (full hue spectrum × value gradient on a single image).
+  loadHueImage();
   renderHuePreview();
   refreshSelectionUI();
 }
