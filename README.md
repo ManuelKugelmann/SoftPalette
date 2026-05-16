@@ -24,25 +24,33 @@ construction.
 |---|---|
 | **image** | Drop, paste (Ctrl+V), click to browse, or pick a built-in test image |
 | **presets** | Curated palette presets — click to apply. `Quake256` is the full canonical 256-entry Quake 1 palette (gfx/palette.lmp); `FullQuake` is its 28-entry hue-binned subset; `SlimQuake` is a hue-deduped subset of `FullQuake` |
-| **palette** | Swatch grid (left column). Edit hex, delete, add new, extract from current image, or clear. Up to 256 anchors |
+| **palette** | 16-per-row swatch grid (left column). Click a swatch → native color picker. Right-click → remove. Up to 256 anchors |
 | **extend palette** | Optional auto-extension: each palette anchor stamps an N×N (L, C) constellation at its hue. `grid` chooses 1 (off), 3 (9 entries / anchor), 5, or 7. `L spread` and `chroma spread` set the ±range per axis. Total seeds are capped to 256 |
-| **lut params · presets row** | `soft` · `balanced` · `hard` — bundled (σ_L, σ_ab, softness) operating points |
+| **lut params · presets row** | `soft` · `balanced` · `hard` — bundled (σ_L, σ_ab, softness, smoothness) operating points. `hard` pairs softness 6 with 2 blur iterations for saturated regions with soft edges |
 | **lut size** | Cube edge: 17 / 33 / 65 / 129 / 257 (production-standard sizes; odd values keep neutral grey cell-centered) |
 | **L tolerance (σ_L)** | Anchor's pull radius along the L axis. Small = tight luminance "stripe", large = anchor reaches across the L range |
 | **chroma tolerance (σ_ab)** | Anchor's pull radius across the A/B (chroma) plane. Small = tight color stripe, large = washy blending |
-| **softness** | IDW power exponent. `1` = mushy linear blend, `~4` = balanced, `>10` = effectively hard-nearest (sharp Voronoi cells) |
+| **softness** | IDW power exponent. `1` = mushy linear blend, `~4` = balanced, `>10` = effectively hard-nearest (sharp Voronoi cells). Operates on the *ratio* `d² / d_min²` so the transition width is scale-free — same softness behaves the same regardless of palette spacing |
+| **smoothness** | Post-build separable Gaussian blur iterations on the 3D LUT (0–6). Soften Voronoi-cell boundaries left by high softness without losing the saturated anchor regions |
 | **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
 
 ## Algorithm
-**Soft 3D Voronoi in OkLab via Shepard inverse-distance weighting.**
+**Chroma-preserving soft 3D Voronoi in OkLab via scale-free Shepard IDW.**
 
 For every LUT cell at OkLab `(L, a, b)`:
 
 ```
-d_i² = ((L − s_i.L) / σ_L)²  +  ((a − s_i.a) / σ_ab)²  +  ((b − s_i.b) / σ_ab)²
-w_i  = (d_i² + ε)^(−softness/2) · s_i.strength
-out  = Σ wᵢ · sᵢ.Lab  /  Σ wᵢ
+d_i²    = ((L − s_i.L) / σ_L)² + ((a − s_i.a) / σ_ab)² + ((b − s_i.b) / σ_ab)²
+d_min²  = min_i d_i²
+w_i     = (d_i² / d_min²)^(−softness/2) · s_i.strength
+sumLab  = Σ w_i · s_i.Lab  /  Σ w_i        (Cartesian Lab average)
+C_avg   = Σ w_i · |s_i.ab| /  Σ w_i        (weighted source chroma)
+coh     = |sumLab.ab| / C_avg              (∈ [0, 1] — anchor agreement on hue)
+out.ab  = sumLab.ab  scaled to magnitude  mix(|sumLab.ab|, C_avg, coh)
+out.L   = sumLab.L
 ```
+
+Then optionally `smoothness` iterations of separable 3D Gaussian blur on the LUT.
 
 - **L and ab tolerances** (`σ_L`, `σ_ab`) shape an anisotropic ellipsoid
   around each anchor. They are *the* "stripe" — bounded in luminance AND
@@ -50,6 +58,18 @@ out  = Σ wᵢ · sᵢ.Lab  /  Σ wᵢ
 - **Softness** is the IDW exponent. Low values give smooth interpolation
   between anchors (3D voronoi blending); high values give hard nearest-
   neighbor quantization (sharp voronoi cells with no gradient between).
+  Operates on the *ratio* `d² / d_min²` so transition behavior is
+  scale-free — a `softness=4` produces the same fractional transition
+  width whether anchors are 0.05 or 0.5 apart in Lab.
+- **Chroma preservation** rescales the blended (a, b) magnitude toward
+  the weighted-average source chroma, but only as far as anchors *agree*
+  on hue (coherence ∈ [0, 1]). High coherence → full chroma boost (no
+  brownish mush in transition zones near aligned anchors). Low coherence
+  (opposing anchors with equal weight) → fall back to the Lab average,
+  which is honestly grey rather than a falsely confident hue invention.
+- **Smoothness** post-blur runs separable 3D Gaussian iterations on the
+  finished LUT — pairs well with high softness for "saturated regions
+  with soft edges."
 - **Extends to the cube borders for free**: at the far corners of OkLab
   space, the closest anchor dominates the weighted sum, so cells inherit
   its color cleanly. No hue gaps need patching, no "missing hue collapses

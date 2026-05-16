@@ -101,26 +101,19 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
 #imageInfo .k{color:var(--txdd)}
 #imageInfo .v{color:var(--tx)}
 
-.swatches{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+/* Swatch grid: 16 colors per row, chip-only. Right-click removes; click opens
+   the native color picker on that swatch. Sized so 16 fit in the side column. */
+.swatches{
+  display:grid;grid-template-columns:repeat(16, 1fr);gap:2px;margin-bottom:8px;
+}
 .swatch{
-  display:flex;align-items:center;gap:4px;padding:3px 6px 3px 3px;
-  border:1px solid var(--bd);background:var(--bg3);position:relative;
+  position:relative;aspect-ratio:1/1;border:1px solid var(--bd);cursor:pointer;
 }
-.swatch .chip{
-  width:18px;height:18px;border:1px solid var(--bd2);cursor:pointer;
-  position:relative;
+.swatch:hover{border-color:var(--bd2)}
+.swatch input{
+  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
+  border:0;padding:0;
 }
-.swatch .chip input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:0;padding:0}
-.swatch .hex{
-  background:transparent;border:0;color:var(--tx);
-  font:inherit;font-size:10px;width:62px;letter-spacing:0.02em;
-  outline:none;text-transform:uppercase;
-}
-.swatch .x{
-  color:var(--txdd);cursor:pointer;font-size:13px;line-height:1;
-  padding:0 2px;background:none;border:none;
-}
-.swatch .x:hover{color:var(--bad);background:none;border:none}
 
 #canvasWrap{
   position:relative;background:var(--bg2);border:1px solid var(--bd);
@@ -321,6 +314,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="softness" min="1" max="12" step="0.1" value="4.0">
     </div>
     <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">post-blur iters</span></span><span class="v" id="vSmoothness">0</span></div>
+      <input type="range" id="smoothness" min="0" max="6" step="1" value="0">
+    </div>
+    <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>lut strength <span style="color:var(--txdd)">blend with identity</span></span><span class="v" id="vLutStrength">100%</span></div>
       <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
     </div>
@@ -427,8 +424,8 @@ const state = {
   palette: PRESETS['teal-orange'].map(h => ({hex: h, strength: 1.0})),
   image: null, imageW: 0, imageH: 0, imageName: '',
   imageTex: null,
-  // GPU LUT (3D texture, RGBA32F, holds OkLab per cell)
-  lutTex: null, lutFbo: null, lutN: 0,
+  // GPU LUT (3D textures ping-pong, RGBA16F, holds OkLab per cell)
+  lutTex: null, lutTex2: null, lutFbo: null, lutN: 0,
   // Seed data texture (RGBA32F, 1 row × MAX_PAL cols, rgb = OkLab, a = strength)
   seedTex: null,
   // Build telemetry (for status line)
@@ -446,6 +443,7 @@ const state = {
     lTol: 0.5,           // σL — L axis falloff
     abTol: 0.2,          // σab — A/B axes falloff (OkLab radius scale)
     softness: 4,         // IDW power exponent; 1=linear, ∞=hard nearest
+    smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: synthesize a grid of (L, C) variants around each anchor.
     // Each real anchor stamps an N×N constellation at its hue: L offset ±lSpread,
@@ -585,25 +583,40 @@ function packSeeds(seeds){
   return buf;
 }
 
-// CPU IDW — same formula as the build shader. Used for the hues preview
-// (which samples seeds directly instead of reading back the GPU LUT).
+// CPU IDW — matches FS_LUT_BUILD: scale-free softness (ratio d²/d_min²) plus
+// chroma-preserving rescale. Used for the hue preview; tracks the GPU output.
 function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
   if (seeds.length === 0) return [L, a, b];
-  let sumW = 1e-12;
-  let sL = 0, sA = 0, sB = 0;
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
   const halfP = softness * 0.5;
+  let dmin2 = Infinity;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
     const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    const w = Math.pow(d2 + 1e-6, -halfP) * s.strength;
-    sumW += w;
-    sL += w * s.L;
-    sA += w * s.a;
-    sB += w * s.b;
+    if (d2 < dmin2) dmin2 = d2;
   }
-  return [sL/sumW, sA/sumW, sB/sumW];
+  let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
+  for (const s of seeds){
+    const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
+    const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
+    const r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
+    const w  = Math.pow(r2, -halfP) * s.strength;
+    sumW += w;
+    sL += w * s.L; sA += w * s.a; sB += w * s.b;
+    sC += w * Math.hypot(s.a, s.b);
+  }
+  const Lo = sL / sumW;
+  let   Ao = sA / sumW, Bo = sB / sumW;
+  const Cavg = sC / sumW;
+  const mag = Math.hypot(Ao, Bo);
+  if (mag > 1e-6){
+    const coh = Math.min(1, mag / Math.max(Cavg, 1e-6));
+    const target = mag + coh * (Cavg - mag);
+    Ao *= target / mag;
+    Bo *= target / mag;
+  }
+  return [Lo, Ao, Bo];
 }
 
 // Synthesize ghost anchors in hue gaps wider than gapThreshold radians.
@@ -622,24 +635,29 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
 // as L — consistent position-based blending.
 // The envelope's later × boost applies uniformly to all anchors, so the
 // synth-to-real chroma ratio stays at (1 − mutedness) regardless of boost.
-// Lazily (re)allocate the 3D LUT texture. Keeps the texture alive across
-// rebuilds when N hasn't changed (avoids GPU thrash).
+// Lazily (re)allocate the 3D LUT textures (build target + ping-pong scratch).
+// Both kept alive across rebuilds when N hasn't changed (avoids GPU thrash).
 function ensureLutTexture(N){
   const gl = state.gl;
   if (state.lutTex && state.lutN === N) return;
-  if (state.lutTex) gl.deleteTexture(state.lutTex);
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_3D, tex);
-  // RGBA16F: half-float is plenty for OkLab values (range ±~1, precision better
-  // than 1/1024 — far below perceptual JND). Uses half the VRAM of RGBA32F.
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, N, N, N, 0, gl.RGBA, gl.HALF_FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-  state.lutTex = tex;
-  state.lutN = N;
+  if (state.lutTex)  gl.deleteTexture(state.lutTex);
+  if (state.lutTex2) gl.deleteTexture(state.lutTex2);
+  function alloc(){
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, t);
+    // RGBA16F: half-float is plenty for OkLab values (range ±~1, precision
+    // better than 1/1024 — far below perceptual JND). Half the VRAM of 32F.
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, N, N, N, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+  state.lutTex  = alloc();
+  state.lutTex2 = alloc();
+  state.lutN    = N;
 }
 
 // One-time seed-data texture (RGBA32F, MAX_PAL × 1). rgb = Lab, a = strength.
@@ -706,6 +724,42 @@ function recomputeLut(){
     gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTex, 0, z);
     gl.uniform1f(uZLoc, z);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  // Smoothness post-pass: separable Gaussian blur on the 3D LUT.
+  // Per iteration: 3 axis-passes (a, b, L), ping-ponging between lutTex/lutTex2.
+  // Odd iteration count would leave the final result in lutTex2, so we always
+  // pong back to lutTex on the last axis-pass (axes per iter is 3, so the
+  // final pong direction depends on total pass count's parity — we explicitly
+  // track src/dst and swap state.lutTex/lutTex2 at the end if needed).
+  const iters = Math.max(0, Math.round(state.params.smoothness || 0));
+  if (iters > 0){
+    const blurProg = state.programs.lutBlur;
+    gl.useProgram(blurProg);
+    gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'), N);
+    const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
+    const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
+    const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
+    gl.uniform1i(uBlurSrc, 1);
+    const axes = [[1,0,0], [0,1,0], [0,0,1]];
+    let src = state.lutTex, dst = state.lutTex2;
+    for (let it = 0; it < iters; it++){
+      for (const ax of axes){
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_3D, src);
+        gl.uniform3f(uBlurAxis, ax[0], ax[1], ax[2]);
+        for (let z = 0; z < N; z++){
+          gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dst, 0, z);
+          gl.uniform1f(uBlurZ, z);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+        const tmp = src; src = dst; dst = tmp;
+      }
+    }
+    // src now holds the latest result. Ensure state.lutTex points at it so the
+    // per-pixel shader samples the freshly-blurred LUT.
+    state.lutTex  = src;
+    state.lutTex2 = dst;
   }
 
   // Restore default framebuffer / viewport.
@@ -792,9 +846,20 @@ void main(){
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
-// LUT build: one fragment per (a, b) cell on the current L-slice. Loops over
-// every palette seed and accumulates the Shepard-weighted Lab blend. Output
-// is RGBA16F into a layer of the TEXTURE_3D LUT.
+// LUT build: one fragment per (a, b) cell on the current L-slice. Computes a
+// chroma-preserving soft-Voronoi blend in OkLab.
+//
+// Pure Cartesian Lab averaging desaturates transition zones — anchors on
+// opposite hues blend through the origin → "brownish mush." We compute both
+// the Cartesian Lab blend AND the weighted-average source chroma, then rescale
+// the blended (a,b) magnitude toward that chroma — modulated by *coherence*
+// (= |blendedAB| / Cavg). High coherence (anchors agree on hue) → full chroma
+// boost. Low coherence (anchors face off) → fall back to the Lab average,
+// which is honestly grey rather than a falsely confident hue invention.
+//
+// Two passes over seeds: first finds d_min² so the IDW exponent operates on
+// distance RATIOS (scale-free softness — same transition width regardless of
+// palette spacing). Second accumulates the chroma-preserving blend.
 const FS_LUT_BUILD = `#version 300 es
 precision highp float;
 out vec4 fragColor;
@@ -813,7 +878,6 @@ void main(){
   float ai   = floor(gl_FragCoord.x);
   float bi   = floor(gl_FragCoord.y);
   float li   = uZ;
-  // Cell-center coordinates: L ∈ [0,1], a,b ∈ [−R, R].
   float L = li / (N - 1.0);
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
@@ -822,9 +886,8 @@ void main(){
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
   float halfP  = uSoftness * 0.5;
 
-  float sumW = 1e-12;
-  vec3  sumLab = vec3(0.0);
-  // GLSL ES 3.00 supports dynamic loops; cap at MAX_PAL with early break.
+  // Pass 1: minimum (squared, anisotropic) distance to any seed.
+  float dmin2 = 1e30;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -832,13 +895,62 @@ void main(){
     float dA = (a - s.y);
     float dB = (b - s.z);
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    // pow(d² + ε, −softness/2). ε floor avoids singularity at the seed itself
-    // — softness>~10 then still yields effectively-hard nearest behavior.
-    float w  = pow(d2 + 1e-6, -halfP) * s.w;
-    sumW    += w;
-    sumLab  += w * s.xyz;
+    dmin2 = min(dmin2, d2);
   }
-  fragColor = vec4(sumLab / sumW, 1.0);
+
+  // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma.
+  float sumW   = 1e-12;
+  vec3  sumLab = vec3(0.0);
+  float sumC   = 0.0;
+  for (int i = 0; i < ${MAX_PAL}; i++){
+    if (i >= uPalN) break;
+    vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
+    float dL = (L - s.x);
+    float dA = (a - s.y);
+    float dB = (b - s.z);
+    float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
+    float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
+    float w  = pow(r2, -halfP) * s.w;
+    sumW   += w;
+    sumLab += w * s.xyz;
+    sumC   += w * length(s.yz);
+  }
+  vec3  lab   = sumLab / sumW;
+  float Cavg  = sumC   / sumW;
+  float magAB = length(lab.yz);
+  // Coherence ∈ [0, 1]: 1 = anchors agree on hue, 0 = anchors face off.
+  // Rescale blended (a,b) magnitude from magAB → mix(magAB, Cavg, coherence).
+  float coherence = magAB / max(Cavg, 1e-6);
+  float target    = mix(magAB, Cavg, clamp(coherence, 0.0, 1.0));
+  if (magAB > 1e-6) lab.yz *= target / magAB;
+  fragColor = vec4(lab, 1.0);
+}`;
+
+// LUT smoothness post-pass: separable 3D Gaussian blur (5-tap (1,4,6,4,1)/16).
+// One pass blurs along uAxis (vec3 unit in normalized 3D-texcoord). 3 passes
+// per iteration cover (a, b, L). Ping-pongs between two RGBA16F 3D textures.
+const FS_LUT_BLUR = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+out vec4 fragColor;
+uniform sampler3D uSrc;
+uniform float uN;
+uniform float uZ;
+uniform vec3  uAxis;
+void main(){
+  float N = uN;
+  vec3 c = vec3(
+    (floor(gl_FragCoord.x) + 0.5) / N,
+    (floor(gl_FragCoord.y) + 0.5) / N,
+    (uZ + 0.5) / N
+  );
+  vec3 d = uAxis / N;
+  vec3 v =        texture(uSrc, clamp(c - 2.0*d, 0.0, 1.0)).rgb
+         + 4.0  * texture(uSrc, clamp(c -     d, 0.0, 1.0)).rgb
+         + 6.0  * texture(uSrc, c).rgb
+         + 4.0  * texture(uSrc, clamp(c +     d, 0.0, 1.0)).rgb
+         +        texture(uSrc, clamp(c + 2.0*d, 0.0, 1.0)).rgb;
+  fragColor = vec4(v / 16.0, 1.0);
 }`;
 
 // Per-pixel: sample the 3D LUT (Lab → Lab) with hardware trilinear, then
@@ -922,6 +1034,7 @@ function initGL(){
 
   state.programs.perPixel = program(VS, FS_PER_PIXEL);
   state.programs.lutBuild = program(VS, FS_LUT_BUILD);
+  state.programs.lutBlur  = program(VS, FS_LUT_BLUR);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -1803,55 +1916,41 @@ function updateExtendStatus(){
   el.textContent = `${palN} × ${grid*grid} = ${wanted}${wanted > MAX_PAL ? ` (capped to ${MAX_PAL})` : ''}`;
 }
 
+// Swatch grid: chip-only, 16 per row. Click → native color picker on that
+// swatch. Right-click (contextmenu) → remove. Hover shows the hex in a tooltip.
 function renderSwatches(){
   const root = document.getElementById('swatches');
   root.innerHTML = '';
   state.palette.forEach((p, i) => {
     const el = document.createElement('div');
     el.className = 'swatch';
-    el.innerHTML = `
-      <div class="chip" style="background:${p.hex}">
-        <input type="color" value="${p.hex}" data-i="${i}" class="cpick">
-      </div>
-      <input type="text" class="hex" value="${p.hex.toUpperCase()}" data-i="${i}" maxlength="7">
-      <button class="x" data-i="${i}" title="remove">×</button>
-    `;
+    el.style.background = p.hex;
+    el.title = p.hex.toUpperCase();
+    el.innerHTML = `<input type="color" value="${p.hex}" data-i="${i}">`;
     root.appendChild(el);
   });
-  root.querySelectorAll('.cpick').forEach(inp => {
+  root.querySelectorAll('input[type="color"]').forEach(inp => {
     inp.addEventListener('input', e => {
       const i = +e.target.dataset.i;
       state.palette[i].hex = e.target.value;
-      e.target.parentElement.style.background = e.target.value;
-      e.target.parentElement.parentElement.querySelector('.hex').value = e.target.value.toUpperCase();
+      const sw = e.target.parentElement;
+      sw.style.background = e.target.value;
+      sw.title = e.target.value.toUpperCase();
       setSelectedPresetBtn(null);
       paletteChanged();
     });
   });
-  root.querySelectorAll('.hex').forEach(inp => {
-    inp.addEventListener('change', e => {
-      const i = +e.target.dataset.i;
-      let v = e.target.value.trim();
-      if (!v.startsWith('#')) v = '#'+v;
-      if (/^#[0-9a-fA-F]{6}$/.test(v)){
-        state.palette[i].hex = v.toLowerCase();
-        setSelectedPresetBtn(null);
-        renderSwatches();
-        paletteChanged();
-      } else {
-        e.target.value = state.palette[i].hex.toUpperCase();
-      }
-    });
-  });
-  root.querySelectorAll('.x').forEach(b => {
-    b.addEventListener('click', e => {
-      const i = +e.target.dataset.i;
-      state.palette.splice(i, 1);
-      setSelectedPresetBtn(null);
-      renderSwatches();
-      paletteChanged();
-    });
-  });
+  // Right-click any swatch to remove it. Listener on the grid (bubbling).
+  root.oncontextmenu = (e) => {
+    const sw = e.target.closest('.swatch');
+    if (!sw) return;
+    e.preventDefault();
+    const i = +sw.querySelector('input').dataset.i;
+    state.palette.splice(i, 1);
+    setSelectedPresetBtn(null);
+    renderSwatches();
+    paletteChanged();
+  };
   document.getElementById('addColor').disabled = state.palette.length >= MAX_PAL;
   document.getElementById('paletteCount').textContent = state.palette.length;
 }
@@ -2012,18 +2111,23 @@ function init(){
   }
   bindLutSlider('lTol',     'vLTol',     'lTol',     v => v.toFixed(2));
   bindLutSlider('abTol',    'vAbTol',    'abTol',    v => v.toFixed(3));
-  bindLutSlider('softness', 'vSoftness', 'softness', v => v.toFixed(1));
+  bindLutSlider('softness',   'vSoftness',   'softness',   v => v.toFixed(1));
+  bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT param presets — three named operating points along the soft/hard axis.
   const lutPresets = {
-    'soft':     { lTol: 0.7, abTol: 0.30, softness: 2.0 },
-    'balanced': { lTol: 0.5, abTol: 0.20, softness: 4.0 },
-    'hard':     { lTol: 0.3, abTol: 0.10, softness: 9.0 },
+    // Soft: low IDW power produces inherent smoothing, no extra blur needed.
+    'soft':     { lTol: 0.7, abTol: 0.30, softness: 2.0, smoothness: 0 },
+    'balanced': { lTol: 0.5, abTol: 0.20, softness: 4.0, smoothness: 0 },
+    // Hard: near-Voronoi snap at the cell level, then 2 blur iters soften the
+    // boundaries — saturated anchor regions with smooth transitions between.
+    'hard':     { lTol: 0.3, abTol: 0.10, softness: 6.0, smoothness: 2 },
   };
   const sliderMap = {
-    lTol:     ['lTol',     'vLTol',     v => v.toFixed(2)],
-    abTol:    ['abTol',    'vAbTol',    v => v.toFixed(3)],
-    softness: ['softness', 'vSoftness', v => v.toFixed(1)],
+    lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
+    abTol:      ['abTol',      'vAbTol',      v => v.toFixed(3)],
+    softness:   ['softness',   'vSoftness',   v => v.toFixed(1)],
+    smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
   };
   function applyLutPreset(name){
     const p = lutPresets[name];
