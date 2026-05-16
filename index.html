@@ -734,11 +734,18 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     if (d2_iso < dmin2_iso) dmin2_iso = d2_iso;
   }
   let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
+  const cellC2 = a*a + b*b;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
     const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     const r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
-    const w  = Math.pow(r2, -halfP) * s.strength;
+    let w = Math.pow(r2, -halfP) * s.strength;
+    // Hue-hemisphere gate — see shader comment.
+    const ancC2 = s.a*s.a + s.b*s.b;
+    if (cellC2 > 1e-6 && ancC2 > 1e-6){
+      const cos_dh = (a*s.a + b*s.b) / Math.sqrt(cellC2 * ancC2);
+      w *= Math.max(0, cos_dh);
+    }
     sumW += w;
     sL += w * s.L; sA += w * s.a; sB += w * s.b;
     sC += w * Math.hypot(s.a, s.b);
@@ -1165,9 +1172,15 @@ void main(){
   }
 
   // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma.
+  // Hue gate: each anchor's weight is multiplied by max(0, cos(hueAngle))
+  // between cell and anchor. Anchors in the opposite hue hemisphere (>90°
+  // from cell) are excluded — prevents the brown/green-mush hue flips like
+  // "purple input → green-ish output" when palette anchors balance across
+  // opposing hues. Greys (cell or anchor C ≈ 0) bypass the gate (no hue).
   float sumW   = 1e-12;
   vec3  sumLab = vec3(0.0);
   float sumC   = 0.0;
+  float cellC2 = a*a + b*b;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -1177,6 +1190,12 @@ void main(){
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     float w  = pow(r2, -halfP) * s.w;
+    // Hue-hemisphere gate.
+    float ancC2 = s.y*s.y + s.z*s.z;
+    if (cellC2 > 1e-6 && ancC2 > 1e-6){
+      float cos_dh = (a*s.y + b*s.z) / sqrt(cellC2 * ancC2);
+      w *= max(0.0, cos_dh);
+    }
     sumW   += w;
     sumLab += w * s.xyz;
     sumC   += w * length(s.yz);
