@@ -851,30 +851,41 @@ function uploadSeeds(packed){
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_PAL, 1, gl.RGBA, gl.FLOAT, packed);
 }
 
-// Luma-look curve: 16×1 RGBA32F holding palette's L-conditional mean (a, b).
-// At each L bin, weighted-average all seed anchors with a Gaussian centered on
-// L_target. The teal-orange palette produces a curve that goes from (negative a,
-// negative b) at low L to (positive a, positive b) at high L — cool→warm with L.
-// Used by the build shader to pre-shift each cell's (a, b) toward the palette's
-// expected L-conditional hue, scaled by uLumaLook.
+// Luma-look curve: 16×1 RGBA32F holding palette's L-conditional 2-tone hue
+// profile. We pick the DARKEST chromatic anchor's (a, b) as the dark endpoint
+// and the LIGHTEST chromatic anchor's (a, b) as the light endpoint, then
+// smooth-step interpolate between them across L. Intermediate-L anchors are
+// IGNORED on purpose — including them in a mean (any kind of cluster average)
+// would drag the dark / light directions away from the palette's actual L
+// extremes. For teal-orange (dark teal + ... + orange) this gives pure teal
+// at low L and pure orange at high L with a clean crossover; no green
+// contamination from the green-teal mid-anchor, no red contamination from
+// the burnt-red mid-anchor.
 const LUMA_BINS = 16;
 function computeLumaCurve(seeds){
   const buf = new Float32Array(LUMA_BINS * 4);
   if (seeds.length === 0) return buf;
-  const sigma = 0.12;  // L-axis Gaussian width
-  const inv2s2 = 1 / (2 * sigma * sigma);
+  // Only anchors with meaningful hue (not greys) can act as 2-tone endpoints.
+  const chromatic = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02);
+  if (chromatic.length === 0) return buf;
+  if (chromatic.length === 1){
+    // Single chromatic anchor: use its (a, b) at every L. Constant curve.
+    const s = chromatic[0];
+    for (let i = 0; i < LUMA_BINS; i++){ buf[i*4] = s.a; buf[i*4+1] = s.b; }
+    return buf;
+  }
+  // 2+ chromatic anchors → pick the L extremes.
+  const sorted = chromatic.slice().sort((x, y) => x.L - y.L);
+  const dark  = sorted[0];
+  const light = sorted[sorted.length - 1];
+  const Ldark = dark.L, Llight = light.L;
   for (let i = 0; i < LUMA_BINS; i++){
-    const Ltgt = i / (LUMA_BINS - 1);
-    let sumW = 1e-12, sumA = 0, sumB = 0;
-    for (const s of seeds){
-      const dL = Ltgt - s.L;
-      const w = Math.exp(-dL * dL * inv2s2) * s.strength;
-      sumW += w;
-      sumA += w * s.a;
-      sumB += w * s.b;
-    }
-    buf[i * 4 + 0] = sumA / sumW;
-    buf[i * 4 + 1] = sumB / sumW;
+    const L = i / (LUMA_BINS - 1);
+    let t = (Llight === Ldark) ? 0.5
+          : Math.max(0, Math.min(1, (L - Ldark) / (Llight - Ldark)));
+    t = t * t * (3 - 2 * t);  // smoothstep crossover
+    buf[i * 4 + 0] = dark.a * (1 - t) + light.a * t;
+    buf[i * 4 + 1] = dark.b * (1 - t) + light.b * t;
   }
   return buf;
 }
