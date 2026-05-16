@@ -101,15 +101,18 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
 #imageInfo .k{color:var(--txdd)}
 #imageInfo .v{color:var(--tx)}
 
-/* Swatch grid: 16 colors per row, chip-only. Right-click removes; click opens
-   the native color picker on that swatch. Sized so 16 fit in the side column. */
-.swatches{
-  display:grid;grid-template-columns:repeat(16, 1fr);gap:2px;margin-bottom:8px;
-}
+/* Swatch grid: one row per hue (chromatic anchors bucketed into 16 hue bins,
+   neutrals on their own row), each row flex-packed left at 16 cells wide.
+   Click any chip → native color picker. Right-click → remove. Hex on hover.
+   Synthetic (auto-extend) chips: dashed border, slightly transparent, read-only. */
+.swatches{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.palrow{display:flex;flex-wrap:wrap;gap:2px}
 .swatch{
-  position:relative;aspect-ratio:1/1;border:1px solid var(--bd);cursor:pointer;
+  position:relative;width:calc((100% - 30px) / 16);aspect-ratio:1/1;
+  border:1px solid var(--bd);cursor:pointer;
 }
 .swatch:hover{border-color:var(--bd2)}
+.swatch.synth{border:1px dashed var(--bd2);opacity:.7;cursor:default}
 .swatch input{
   position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
   border:0;padding:0;
@@ -248,7 +251,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <h2>palette <span class="badge"><span id="paletteCount">0</span>/256</span></h2>
     <div class="swatches" id="swatches"></div>
     <div class="row tight">
-      <button id="addColor">+ add</button>
+      <button id="addColor" title="Append a mid-grey anchor">+ add</button>
+      <button id="addBW" title="Append #000000 and #ffffff (skips duplicates)">+ b/w</button>
       <button id="extractColors">extract from image</button>
       <button id="clearPalette">clear</button>
     </div>
@@ -533,17 +537,17 @@ function rgbToOklab(r,g,b){
        (Lab-space trilinear — perceptually correct, no manual interpolation).
 */
 
-// Build palette seed list as OkLab tuples. Optionally extends each anchor into
-// an N×N (L, C) grid — extra seeds at offset L and offset chroma along the
-// anchor's own hue direction. Grey anchors (C≈0) get only the L spread.
-// Output is capped at MAX_PAL: large palettes with extension fill the seed
-// texture in palette order then stop, so the final anchors won't expand.
+// Build palette seed list as OkLab tuples. Each seed carries a `synthetic`
+// flag: false for real palette entries, true for grid-extended variants.
+// Optionally extends each anchor into an N×N (L, C) grid — extra seeds at
+// offset L and offset chroma along the anchor's own hue direction. Grey
+// anchors (C≈0) get only the L spread. Output is capped at MAX_PAL.
 function paletteSeeds(){
   const real = [];
   for (const p of state.palette){
     const [r,g,b] = hexToRgb(p.hex);
     const lab = rgbToOklab(r, g, b);
-    real.push({L: lab[0], a: lab[1], b: lab[2], strength: p.strength});
+    real.push({L: lab[0], a: lab[1], b: lab[2], strength: p.strength, synthetic: false});
   }
   const par = state.params;
   const grid = par.extendPalette ? Math.max(1, Math.round(par.extendGrid)) : 1;
@@ -562,9 +566,10 @@ function paletteSeeds(){
       if (out.length >= MAX_PAL) break;
       for (let ci = -half; ci <= half; ci++){
         if (out.length >= MAX_PAL) break;
+        const isCenter = (li === 0 && ci === 0);
         const L    = Math.max(0, Math.min(1, s.L + li * lStep));
         const Cnew = Math.max(0, C0 + ci * cStep);
-        out.push({L, a: hx * Cnew, b: hy * Cnew, strength: s.strength});
+        out.push({L, a: hx * Cnew, b: hy * Cnew, strength: s.strength, synthetic: !isCenter});
       }
     }
   }
@@ -688,7 +693,10 @@ function recomputeLut(){
   const gl = state.gl;
   if (!gl) return;
   const seeds = paletteSeeds();
-  const palN = Math.min(seeds.length, MAX_PAL);
+  const palN  = Math.min(seeds.length, MAX_PAL);
+  // Cache synth subset for the swatch grid (so synth chips reflect the actual
+  // seeds the LUT was built from, after MAX_PAL cap).
+  state.synthSeeds = seeds.slice(0, palN).filter(s => s.synthetic);
   if (palN === 0){ state.lutBuildMs = 0; updateLutStatus(); renderHuePreview(); return; }
 
   // Pin LUT size to one of the supported values.
@@ -769,6 +777,7 @@ function recomputeLut(){
   state.lutBuildMs = performance.now() - t0;
   updateLutStatus();
   renderHuePreview();
+  renderSwatches();  // reflect updated synth seeds in the chip grid
 }
 
 function updateLutStatus(){
@@ -926,9 +935,14 @@ void main(){
   fragColor = vec4(lab, 1.0);
 }`;
 
-// LUT smoothness post-pass: separable 3D Gaussian blur (5-tap (1,4,6,4,1)/16).
-// One pass blurs along uAxis (vec3 unit in normalized 3D-texcoord). 3 passes
-// per iteration cover (a, b, L). Ping-pongs between two RGBA16F 3D textures.
+// LUT smoothness post-pass: separable 3D Gaussian blur (5-tap (1,4,6,4,1)/16)
+// with the same chroma-preserving trick as the IDW build. A plain Lab blur
+// re-introduces the brown-mush bug across Voronoi cell boundaries (averaging
+// (a,b) vectors of different hues collapses magnitude). Solution: blur the Lab
+// vectors AND blur scalar chroma magnitude separately, then rescale (a,b)
+// toward the chroma blend, modulated by coherence so opposing-hue neighbors
+// still desaturate honestly instead of inventing a false hue.
+// Storage: .r=L, .g=a, .b=b in the RGBA16F LUT.
 const FS_LUT_BLUR = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -945,12 +959,20 @@ void main(){
     (uZ + 0.5) / N
   );
   vec3 d = uAxis / N;
-  vec3 v =        texture(uSrc, clamp(c - 2.0*d, 0.0, 1.0)).rgb
-         + 4.0  * texture(uSrc, clamp(c -     d, 0.0, 1.0)).rgb
-         + 6.0  * texture(uSrc, c).rgb
-         + 4.0  * texture(uSrc, clamp(c +     d, 0.0, 1.0)).rgb
-         +        texture(uSrc, clamp(c + 2.0*d, 0.0, 1.0)).rgb;
-  fragColor = vec4(v / 16.0, 1.0);
+  vec3 s0 = texture(uSrc, clamp(c - 2.0*d, 0.0, 1.0)).rgb;
+  vec3 s1 = texture(uSrc, clamp(c -     d, 0.0, 1.0)).rgb;
+  vec3 s2 = texture(uSrc, c).rgb;
+  vec3 s3 = texture(uSrc, clamp(c +     d, 0.0, 1.0)).rgb;
+  vec3 s4 = texture(uSrc, clamp(c + 2.0*d, 0.0, 1.0)).rgb;
+  // (1,4,6,4,1)/16 weights — sum-to-one so the chroma blend is a true mean.
+  vec3  v    = (      s0 + 4.0*s1 + 6.0*s2 + 4.0*s3 +       s4) * (1.0/16.0);
+  float Cavg = (length(s0.gb) + 4.0*length(s1.gb) + 6.0*length(s2.gb)
+              + 4.0*length(s3.gb) +     length(s4.gb)) * (1.0/16.0);
+  float magAB = length(v.gb);
+  float coh   = magAB / max(Cavg, 1e-6);
+  float target = mix(magAB, Cavg, clamp(coh, 0.0, 1.0));
+  if (magAB > 1e-6) v.gb *= target / magAB;
+  fragColor = vec4(v, 1.0);
 }`;
 
 // Per-pixel: sample the 3D LUT (Lab → Lab) with hardware trilinear, then
@@ -1916,19 +1938,68 @@ function updateExtendStatus(){
   el.textContent = `${palN} × ${grid*grid} = ${wanted}${wanted > MAX_PAL ? ` (capped to ${MAX_PAL})` : ''}`;
 }
 
-// Swatch grid: chip-only, 16 per row. Click → native color picker on that
-// swatch. Right-click (contextmenu) → remove. Hover shows the hex in a tooltip.
+// Swatch grid: chips bucketed by hue (16 chromatic bins + neutrals row),
+// sorted by L within each bin, packed left at 16 cells per line. Click any
+// chip → native color picker. Right-click → remove (real chips only).
+// Synthetic chips (auto-extend) get a dashed border + slight transparency and
+// are read-only. Hex appears on hover via `title`.
+const HUE_BINS = 16;
+const HUE_NEUTRAL_C = 0.02;  // chroma below this → "neutrals" bucket
+
+function _seedToHex(L, a, b){
+  const lin = oklabToLinearJS(L, a, b);
+  const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+  const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+  const c = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+  return rgbToHex(r, g, c);
+}
+
 function renderSwatches(){
   const root = document.getElementById('swatches');
   root.innerHTML = '';
+
+  // Build a unified entry list: real palette + cached synth seeds.
+  const entries = [];
   state.palette.forEach((p, i) => {
-    const el = document.createElement('div');
-    el.className = 'swatch';
-    el.style.background = p.hex;
-    el.title = p.hex.toUpperCase();
-    el.innerHTML = `<input type="color" value="${p.hex}" data-i="${i}">`;
-    root.appendChild(el);
+    const [r,g,b] = hexToRgb(p.hex);
+    const lab = rgbToOklab(r, g, b);
+    entries.push({hex: p.hex, L: lab[0], a: lab[1], b: lab[2], idx: i, synth: false});
   });
+  for (const s of (state.synthSeeds || [])){
+    entries.push({hex: _seedToHex(s.L, s.a, s.b), L: s.L, a: s.a, b: s.b, idx: -1, synth: true});
+  }
+
+  // Bucket by hue: HUE_BINS chromatic bins (sliced from -π..+π) + 1 neutrals.
+  // Neutrals are pushed to the bottom row for visual separation.
+  const buckets = Array.from({length: HUE_BINS + 1}, () => []);
+  for (const e of entries){
+    const C = Math.hypot(e.a, e.b);
+    if (C < HUE_NEUTRAL_C){ buckets[HUE_BINS].push(e); continue; }
+    const h = (Math.atan2(e.b, e.a) + Math.PI) / (2 * Math.PI); // [0, 1)
+    const bin = Math.min(HUE_BINS - 1, Math.floor(h * HUE_BINS));
+    buckets[bin].push(e);
+  }
+  for (const bk of buckets) bk.sort((x, y) => x.L - y.L);
+
+  // Render one .palrow per non-empty bucket.
+  for (const bk of buckets){
+    if (bk.length === 0) continue;
+    const row = document.createElement('div');
+    row.className = 'palrow';
+    for (const e of bk){
+      const el = document.createElement('div');
+      el.className = e.synth ? 'swatch synth' : 'swatch';
+      el.style.background = e.hex;
+      el.title = e.hex.toUpperCase() + (e.synth ? ' (synth)' : '');
+      if (!e.synth){
+        el.innerHTML = `<input type="color" value="${e.hex}" data-i="${e.idx}">`;
+      }
+      row.appendChild(el);
+    }
+    root.appendChild(row);
+  }
+
+  // Color-picker change → update palette entry.
   root.querySelectorAll('input[type="color"]').forEach(inp => {
     inp.addEventListener('input', e => {
       const i = +e.target.dataset.i;
@@ -1940,19 +2011,24 @@ function renderSwatches(){
       paletteChanged();
     });
   });
-  // Right-click any swatch to remove it. Listener on the grid (bubbling).
+  // Right-click any real chip to remove it. Synth chips are ignored.
   root.oncontextmenu = (e) => {
     const sw = e.target.closest('.swatch');
-    if (!sw) return;
+    if (!sw || sw.classList.contains('synth')) return;
     e.preventDefault();
-    const i = +sw.querySelector('input').dataset.i;
+    const inp = sw.querySelector('input');
+    if (!inp) return;
+    const i = +inp.dataset.i;
     state.palette.splice(i, 1);
     setSelectedPresetBtn(null);
     renderSwatches();
     paletteChanged();
   };
+
   document.getElementById('addColor').disabled = state.palette.length >= MAX_PAL;
-  document.getElementById('paletteCount').textContent = state.palette.length;
+  const synthN = (state.synthSeeds || []).length;
+  const real   = state.palette.length;
+  document.getElementById('paletteCount').textContent = synthN > 0 ? `${real}+${synthN}` : `${real}`;
 }
 
 function setPalette(hexes){
@@ -2050,6 +2126,22 @@ function init(){
     setSelectedPresetBtn(null);
     renderSwatches();
     paletteChanged();
+  });
+  // Append #000000 and #ffffff, skipping any already present and respecting cap.
+  document.getElementById('addBW').addEventListener('click', () => {
+    const have = new Set(state.palette.map(p => p.hex.toLowerCase()));
+    let added = false;
+    for (const h of ['#000000', '#ffffff']){
+      if (!have.has(h) && state.palette.length < MAX_PAL){
+        state.palette.push({hex: h, strength: 1.0});
+        added = true;
+      }
+    }
+    if (added){
+      setSelectedPresetBtn(null);
+      renderSwatches();
+      paletteChanged();
+    }
   });
   document.getElementById('extractColors').addEventListener('click', () => {
     setSelectedPresetBtn(null);
