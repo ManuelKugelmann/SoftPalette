@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:00:22Z">
+<meta name="build" content="2026-05-16T20:15:30Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:00:22Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:15:30Z</span>
   </div>
 </header>
 
@@ -349,8 +349,16 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>reach <span style="color:var(--txdd)">desat beyond this Lab dist to nearest anchor</span></span><span class="v" id="vReach">0.25</span></div>
+      <div class="lbl"><span>reach <span style="color:var(--txdd)">desat outside</span></span><span class="v" id="vReach">0.25</span></div>
       <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>L env ± <span style="color:var(--txdd)">0=snap to anchor L</span></span><span class="v" id="vLExt">1.00</span></div>
+      <input type="range" id="lExt" min="0" max="1" step="0.01" value="1.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>C env ± <span style="color:var(--txdd)">0=snap to anchor C</span></span><span class="v" id="vCExt">0.40</span></div>
+      <input type="range" id="cExt" min="0" max="0.4" step="0.005" value="0.40">
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>smoothness <span style="color:var(--txdd)">blur+restamp iters (toward harmonic limit)</span></span><span class="v" id="vSmoothness">0</span></div>
@@ -510,6 +518,13 @@ const state = {
     reach:  0.25,        // anchor rejection radius (absolute OkLab units). Beyond
                          // this Lab distance to the nearest anchor, output desat
                          // urates — palette has no good answer for that cell.
+    // Per-channel envelope clamp around the nearest anchor's L and C.
+    // Final output L is clamped to [nearest.L − lExt, nearest.L + lExt];
+    // final output chroma similarly clamped around the nearest anchor's C.
+    // Range max = full axis range (1.0 for L, LUT_AB_RANGE for C) → noop.
+    // Range 0 → hard snap to the nearest anchor's L / C respectively.
+    lExt:   1.0,         // L envelope half-range (0 = hard snap to anchor L)
+    cExt:   0.40,        // C envelope half-range (0 = hard snap to anchor C)
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -820,7 +835,7 @@ function packSeeds(seeds){
 
 // CPU IDW — mirrors FS_LUT_BUILD: luma pre-shift, scale-free softness, chroma-
 // preserving rescale, per-axis blend toward input cell L and C, rejection.
-function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook){
+function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook, lExt, cExt){
   if (seeds.length === 0) return [L, a, b];
   // Luma-look: read expected (a, b) at this L (no pre-shift of cell); used to
   // bias IDW weights toward palette anchors aligned with the curve direction.
@@ -836,12 +851,16 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
   const halfP = softness * 0.5;
-  let dmin2 = Infinity;
-  let dmin2_iso = Infinity;
+  let dmin2 = Infinity, dmin2_iso = Infinity;
+  let nearestL = 0.5, nearestC = 0;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
     const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    if (d2 < dmin2) dmin2 = d2;
+    if (d2 < dmin2){
+      dmin2 = d2;
+      nearestL = s.L;
+      nearestC = Math.hypot(s.a, s.b);
+    }
     const d2_iso = dL*dL + dA*dA + dB*dB;
     if (d2_iso < dmin2_iso) dmin2_iso = d2_iso;
   }
@@ -892,6 +911,20 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
   Ao *= reject;
   Bo *= reject;
   Lo = Lo + lRange * (L - Lo);
+  // Per-channel envelope clamp around the nearest anchor's L / C.
+  if (lExt !== undefined){
+    Lo = Math.max(nearestL - lExt, Math.min(nearestL + lExt, Lo));
+  }
+  if (cExt !== undefined){
+    const outC = Math.hypot(Ao, Bo);
+    const minC = Math.max(0, nearestC - cExt);
+    const maxC = nearestC + cExt;
+    const clampedC = Math.max(minC, Math.min(maxC, outC));
+    if (outC > 1e-6){
+      Ao *= clampedC / outC;
+      Bo *= clampedC / outC;
+    }
+  }
   return [Lo, Ao, Bo];
 }
 
@@ -1101,6 +1134,8 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uLRange'),  state.params.lRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCRange'),  state.params.cRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),   state.params.reach);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLExt'),    state.params.lExt);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uCExt'),    state.params.cExt);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
   // Bind luma-curve texture (unit 2). LINEAR sampling gives smooth L→(a,b).
   gl.activeTexture(gl.TEXTURE2);
@@ -1282,6 +1317,8 @@ uniform float uSoftness;      // IDW power exponent
 uniform float uLRange;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCRange;        // 0 = snap chroma to anchor, 1 = passthrough cell C
 uniform float uReach;         // anchor rejection radius in absolute OkLab units
+uniform float uLExt;          // L envelope half-range (0 = snap, 1 = noop)
+uniform float uCExt;          // C envelope half-range (0 = snap, LUT_AB_RANGE = noop)
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
 uniform sampler2D uLumaCurve; // 16×1 RGBA32F: rg = palette mean (a, b) at L
 uniform float uLumaLook;      // 0 = no shift; 1 = full pre-shift to L-mean hue
@@ -1311,10 +1348,13 @@ void main(){
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
   float halfP  = uSoftness * 0.5;
 
-  // Pass 1: minimum anisotropic d² (for IDW scaling) AND minimum isotropic d²
-  // in absolute OkLab units (for the rejection envelope below).
+  // Pass 1: minimum anisotropic d² (for IDW scaling), minimum isotropic d²
+  // (for rejection envelope), and TRACK the nearest anchor's L and C (for
+  // the per-channel envelope clamp later).
   float dmin2     = 1e30;
   float dmin2_iso = 1e30;
+  float nearestL  = 0.5;
+  float nearestC  = 0.0;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -1322,7 +1362,11 @@ void main(){
     float dA = (a - s.y);
     float dB = (b - s.z);
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    dmin2     = min(dmin2,     d2);
+    if (d2 < dmin2){
+      dmin2    = d2;
+      nearestL = s.x;
+      nearestC = length(s.yz);
+    }
     dmin2_iso = min(dmin2_iso, dL*dL + dA*dA + dB*dB);
   }
 
@@ -1394,6 +1438,16 @@ void main(){
   float r2 = dmin2_iso / max(uReach * uReach, 1e-9);
   lab.yz *= exp(-max(r2 - 1.0, 0.0));
   lab.x = mix(lab.x, L, uLRange);
+  // Per-channel envelope clamp around the nearest anchor's L / C. At max
+  // slider (uLExt=1, uCExt=LUT_AB_RANGE) the range covers the whole axis and
+  // the clamp is a noop. At 0 the output is hard-snapped to the nearest
+  // anchor's L or C (chroma magnitude collapsed; hue direction kept).
+  lab.x = clamp(lab.x, nearestL - uLExt, nearestL + uLExt);
+  float outC      = length(lab.yz);
+  float minC      = max(0.0, nearestC - uCExt);
+  float maxC      = nearestC + uCExt;
+  float clampedC  = clamp(outC, minC, maxC);
+  if (outC > 1e-6) lab.yz *= clampedC / outC;
   fragColor = vec4(lab, 1.0);
 }`;
 
@@ -2517,7 +2571,7 @@ function renderLutSlicePreview(){
     const b = LUT_AB_RANGE - (y / (H - 1)) * 2 * LUT_AB_RANGE;
     for (let x = 0; x < W; x++){
       const a = -LUT_AB_RANGE + (x / (W - 1)) * 2 * LUT_AB_RANGE;
-      const [oL, oa, ob] = idwLab(L, a, b, seeds, par.lTol, par.abTol, par.softness, par.lRange, par.cRange, par.reach, lumaCurve, par.lumaLook);
+      const [oL, oa, ob] = idwLab(L, a, b, seeds, par.lTol, par.abTol, par.softness, par.lRange, par.cRange, par.reach, lumaCurve, par.lumaLook, par.lExt, par.cExt);
       _writeLabToRGBA(dst, (y * W + x) * 4, oL, oa, ob);
     }
   }
@@ -2941,6 +2995,8 @@ function init(){
   bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
   bindLutSlider('lumaLook',   'vLumaLook',   'lumaLook',   v => v.toFixed(2));
   bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
+  bindLutSlider('lExt',       'vLExt',       'lExt',       v => v.toFixed(2));
+  bindLutSlider('cExt',       'vCExt',       'cExt',       v => v.toFixed(3));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT-slice L picker (diagnostic) — re-renders the slice preview only.
@@ -2964,19 +3020,19 @@ function init(){
   // the slider displays the inverse so higher slider position = softer.
   const lutPresets = {
     // Wash: faded vintage — low output chroma, subtle cinematic tint.
-    'wash':      { lTol: 0.8, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, smoothness: 2, lumaLook: 0.30 },
+    'wash':      { lTol: 0.8, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
     // Soft: gentle IDW blend, image structure clear, moderate cinematic feel.
-    'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2, lumaLook: 0.35 },
+    'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.35 },
     // Balanced: middle of the road.
-    'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, smoothness: 2, lumaLook: 0.25 },
+    'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.25 },
     // Vivid: sharp hue separation, high chroma passthrough so saturated
     // inputs stay punchy. Minimal luma look so the palette's own hues
     // dominate without strong shadow/highlight rebias.
-    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, smoothness: 2, lumaLook: 0.10 },
+    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.10 },
     // Hard: short gradients between palette hues — near-Voronoi cells with
     // tight σ_ab. Strong luma look pushes shadows/highlights firmly into
     // palette's dark/light tints, the "filmic graphic" feel.
-    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.6,  reach: 0.40, smoothness: 1, lumaLook: 0.50 },
+    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.6,  reach: 0.40, lExt: 0.20, cExt: 0.06, smoothness: 1, lumaLook: 0.50 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
@@ -2984,6 +3040,8 @@ function init(){
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     cRange:     ['cRange',     'vCRange',     v => v.toFixed(2)],
     reach:      ['reach',      'vReach',      v => v.toFixed(2)],
+    lExt:       ['lExt',       'vLExt',       v => v.toFixed(2)],
+    cExt:       ['cExt',       'vCExt',       v => v.toFixed(3)],
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
   };
