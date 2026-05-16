@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T21:14:51Z">
+<meta name="build" content="2026-05-16T21:23:46Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T21:14:51Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T21:23:46Z</span>
   </div>
 </header>
 
@@ -648,6 +648,138 @@ function hpluvBoostedToRgb(h, s, l, boost){
     if (len >= 0 && len < minLen) minLen = len;
   }
   return _luvLchToRgb(l, Math.min(minD * boost * s / 100, minLen), hr);
+}
+// Okhsl → sRGB byte triple (Björn Ottosson 2021, https://bottosson.github.io/posts/colorpicker/).
+// HSL parameterization over OkLab: h ∈ [0,360), s ∈ [0,1], l ∈ [0,1]. l is the
+// "toed" perceptual lightness — l=0 → black, l=0.5 → mid grey, l=1 → white.
+// At s=1 the result is the most-chromatic in-gamut color for that (h, l)
+// (analytically computed via OkLab cusp finding + a Halley refinement step).
+// More perceptually accurate than HSLuv (OkLab > CIELUV for hue uniformity).
+function _okhslToe(x){
+  const k1 = 0.206, k2 = 0.03, k3 = (1 + k1) / (1 + k2);
+  return 0.5 * (k3 * x - k1 + Math.sqrt((k3 * x - k1) * (k3 * x - k1) + 4 * k2 * k3 * x));
+}
+function _okhslToeInv(x){
+  const k1 = 0.206, k2 = 0.03, k3 = (1 + k1) / (1 + k2);
+  return (x * x + k1 * x) / (k3 * (x + k2));
+}
+function _okhslMaxSat(a, b){
+  let k0, k1, k2, k3, k4, wl, wm, ws;
+  if (-1.88170328 * a - 0.80936493 * b > 1){
+    k0=+1.19086277; k1=+1.76576728; k2=+0.59662641; k3=+0.75515197; k4=+0.56771245;
+    wl=+4.0767416621; wm=-3.3077115913; ws=+0.2309699292;
+  } else if (1.81444104 * a - 1.19445276 * b > 1){
+    k0=+0.73956515; k1=-0.45954404; k2=+0.08285427; k3=+0.12541070; k4=+0.14503204;
+    wl=-1.2684380046; wm=+2.6097574011; ws=-0.3413193965;
+  } else {
+    k0=+1.35733652; k1=-0.00915799; k2=-1.15130210; k3=-0.50559606; k4=+0.00692167;
+    wl=-0.0041960863; wm=-0.7034186147; ws=+1.7076147010;
+  }
+  let S = k0 + k1 * a + k2 * b + k3 * a * a + k4 * a * b;
+  const k_l = +0.3963377774 * a + 0.2158037573 * b;
+  const k_m = -0.1055613458 * a - 0.0638541728 * b;
+  const k_s = -0.0894841775 * a - 1.2914855480 * b;
+  const l_ = 1 + S * k_l, m_ = 1 + S * k_m, s_ = 1 + S * k_s;
+  const l = l_*l_*l_, m = m_*m_*m_, ss = s_*s_*s_;
+  const l1 = 3*k_l*l_*l_, m1 = 3*k_m*m_*m_, s1 = 3*k_s*s_*s_;
+  const l2 = 6*k_l*k_l*l_, m2 = 6*k_m*k_m*m_, s2 = 6*k_s*k_s*s_;
+  const f  = wl*l  + wm*m  + ws*ss;
+  const f1 = wl*l1 + wm*m1 + ws*s1;
+  const f2 = wl*l2 + wm*m2 + ws*s2;
+  return S - f * f1 / (f1 * f1 - 0.5 * f * f2);
+}
+function _okhslCusp(a, b){
+  const S = _okhslMaxSat(a, b);
+  const rgb = oklabToLinearJS(1, S * a, S * b);
+  const L = Math.cbrt(1 / Math.max(rgb[0], rgb[1], rgb[2]));
+  return [L, L * S];
+}
+function _okhslGamutIntersection(a, b, L1, C1, L0, cusp){
+  let t;
+  if (((L1 - L0) * cusp[1] - (cusp[0] - L0) * C1) <= 0){
+    t = cusp[1] * L0 / (C1 * cusp[0] + cusp[1] * (L0 - L1));
+  } else {
+    t = cusp[1] * (L0 - 1) / (C1 * (cusp[0] - 1) + cusp[1] * (L0 - L1));
+    const dL = L1 - L0, dC = C1;
+    const k_l = +0.3963377774 * a + 0.2158037573 * b;
+    const k_m = -0.1055613458 * a - 0.0638541728 * b;
+    const k_s = -0.0894841775 * a - 1.2914855480 * b;
+    const l_dt = dL + dC * k_l, m_dt = dL + dC * k_m, s_dt = dL + dC * k_s;
+    const L = L0 * (1 - t) + t * L1, C = t * C1;
+    const l_ = L + C * k_l, m_ = L + C * k_m, s_ = L + C * k_s;
+    const l = l_*l_*l_, m = m_*m_*m_, ss = s_*s_*s_;
+    const ldt = 3*l_dt*l_*l_, mdt = 3*m_dt*m_*m_, sdt = 3*s_dt*s_*s_;
+    const ldt2 = 6*l_dt*l_dt*l_, mdt2 = 6*m_dt*m_dt*m_, sdt2 = 6*s_dt*s_dt*s_;
+    const r  =  4.0767416621*l  - 3.3077115913*m  + 0.2309699292*ss - 1;
+    const r1 =  4.0767416621*ldt - 3.3077115913*mdt + 0.2309699292*sdt;
+    const r2 =  4.0767416621*ldt2- 3.3077115913*mdt2+ 0.2309699292*sdt2;
+    const g  = -1.2684380046*l  + 2.6097574011*m  - 0.3413193965*ss - 1;
+    const g1 = -1.2684380046*ldt + 2.6097574011*mdt - 0.3413193965*sdt;
+    const g2 = -1.2684380046*ldt2+ 2.6097574011*mdt2- 0.3413193965*sdt2;
+    const u  = -0.0041960863*l  - 0.7034186147*m  + 1.7076147010*ss - 1;
+    const u1 = -0.0041960863*ldt - 0.7034186147*mdt + 1.7076147010*sdt;
+    const u2 = -0.0041960863*ldt2- 0.7034186147*mdt2+ 1.7076147010*sdt2;
+    const ur = r1 / (r1*r1 - 0.5*r*r2);
+    const ug = g1 / (g1*g1 - 0.5*g*g2);
+    const ub = u1 / (u1*u1 - 0.5*u*u2);
+    let tr = ur >= 0 ? -r * ur : 1e5;
+    let tg = ug >= 0 ? -g * ug : 1e5;
+    let tb = ub >= 0 ? -u * ub : 1e5;
+    t += Math.min(tr, Math.min(tg, tb));
+  }
+  return t;
+}
+function _okhslCs(L, a, b){
+  const cusp = _okhslCusp(a, b);
+  const Cmax = _okhslGamutIntersection(a, b, L, 1, L, cusp);
+  const STmaxS = cusp[1] / cusp[0], STmaxT = cusp[1] / (1 - cusp[0]);
+  const k = Cmax / Math.min(L * STmaxS, (1 - L) * STmaxT);
+  const Smid = 0.11516993 + 1 / (
+    +7.44778970 + 4.15901240 * b +
+    a * (-2.19557347 + 1.75198401 * b +
+    a * (-2.13704948 - 10.02301043 * b +
+    a * (-4.24894561 +  5.38770819 * b + 4.69891013 * a))));
+  const Tmid = 0.11239642 + 1 / (
+    +1.61320320 - 0.68124379 * b +
+    a * (+0.40370612 + 0.90148123 * b +
+    a * (-0.27087943 + 0.61223990 * b +
+    a * (+0.00299215 - 0.45399568 * b - 0.14661872 * a))));
+  const Ca = L * Smid, Cb = (1 - L) * Tmid;
+  const Cmid = 0.9 * k * Math.sqrt(Math.sqrt(1 / (1 / (Ca*Ca*Ca*Ca) + 1 / (Cb*Cb*Cb*Cb))));
+  const Cd = L * 0.4, Ce = (1 - L) * 0.8;
+  const C0 = Math.sqrt(1 / (1 / (Cd*Cd) + 1 / (Ce*Ce)));
+  return [C0, Cmid, Cmax];
+}
+function okhslToRgb(h, s, l){
+  if (l >= 1)  return [255, 255, 255];
+  if (l <= 0)  return [0, 0, 0];
+  const hr = h * Math.PI / 180;
+  const a_ = Math.cos(hr), b_ = Math.sin(hr);
+  const L  = _okhslToeInv(l);
+  let aa = 0, bb = 0;
+  if (s > 0){
+    const [C0, Cmid, Cmax] = _okhslCs(L, a_, b_);
+    const mid = 0.8, midInv = 1.25;
+    let C;
+    if (s < mid){
+      const t = midInv * s;
+      const k1 = mid * C0;
+      const k2 = 1 - k1 / Cmid;
+      C = t * k1 / (1 - k2 * t);
+    } else {
+      const t  = (s - mid) / (1 - mid);
+      const k0 = Cmid;
+      const k1 = (1 - mid) * Cmid * Cmid * midInv * midInv / C0;
+      const k2 = 1 - k1 / (Cmax - Cmid);
+      C = k0 + t * k1 / (1 - k2 * t);
+    }
+    aa = C * a_; bb = C * b_;
+  }
+  const lin = oklabToLinearJS(L, aa, bb);
+  const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+  const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+  const c = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(c * 255)];
 }
 function hsluvToRgb(h, s, l){
   if (l > 99.9999999) return [255, 255, 255];
@@ -1112,12 +1244,13 @@ function uploadSeeds(packed){
 // means is a smoothstep across the cluster L means.
 const LUMA_BINS = 16;
 const HUE_ENV_BINS = 32;
-// Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians). Each
-// bin's bounds are smooth weighted soft-min / soft-max of palette anchor L
-// and C, with anchors weighted by Gaussian on angular hue distance (σ=π/4).
-// The shader samples this at the cell's hue and uses it as the envelope
-// clamp's center — so the envelope follows the palette's hue→(L,C) ramp
-// instead of jumping discontinuously at Voronoi-cell boundaries.
+// Build a 32×(L_center, C_center) curve indexed by hue (radians). Each bin
+// holds the Gaussian-weighted MEAN L and mean C of palette anchors near that
+// hue (σ=π/3). Envelope clamp at the shader uses sample ± slider extent,
+// so the envelope center follows the palette's hue→(L,C) ramp smoothly.
+// (An earlier version stored soft-min/soft-max bounds with β=20, but that
+// behaved like a hard min/max — bin-to-bin jumps showed up as posterized
+// rings on smooth hue gradients.)
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
   const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02);
@@ -1126,41 +1259,30 @@ function computeHueLCCurve(seeds){
     for (const s of seeds){ sL += s.L; sC += Math.hypot(s.a, s.b); }
     const mL = seeds.length ? sL / seeds.length : 0.5;
     const mC = seeds.length ? sC / seeds.length : 0;
-    for (let i = 0; i < HUE_ENV_BINS; i++){
-      buf[i*4+0] = mL; buf[i*4+1] = mL; buf[i*4+2] = mC; buf[i*4+3] = mC;
-    }
+    for (let i = 0; i < HUE_ENV_BINS; i++){ buf[i*4+0] = mL; buf[i*4+1] = mC; }
     return buf;
   }
   const A = ch.map(s => ({
     h: Math.atan2(s.b, s.a),
     L: s.L,
     C: Math.hypot(s.a, s.b),
+    w0: s.strength != null ? s.strength : 1,
   }));
-  const sigma = Math.PI / 4;
+  const sigma = Math.PI / 3;
   const inv2s2 = 1 / (2 * sigma * sigma);
-  const beta = 20;
   for (let i = 0; i < HUE_ENV_BINS; i++){
-    const t = (i + 0.5) / HUE_ENV_BINS;          // bin center in [0,1)
-    const tt = t * 2 * Math.PI - Math.PI;    // [-π, π]
-    let sumW = 1e-12, sumNegL = 0, sumPosL = 0, sumNegC = 0, sumPosC = 0;
+    const tt = ((i + 0.5) / HUE_ENV_BINS) * 2 * Math.PI - Math.PI;
+    let sumW = 1e-12, sL = 0, sC = 0;
     for (const s of A){
       let d = Math.abs(s.h - tt);
       if (d > Math.PI) d = 2 * Math.PI - d;
-      const w = Math.exp(-d * d * inv2s2);
-      sumW    += w;
-      sumNegL += w * Math.exp(-beta * s.L);
-      sumPosL += w * Math.exp( beta * s.L);
-      sumNegC += w * Math.exp(-beta * s.C);
-      sumPosC += w * Math.exp( beta * s.C);
+      const w = Math.exp(-d * d * inv2s2) * s.w0;
+      sumW += w;
+      sL   += w * s.L;
+      sC   += w * s.C;
     }
-    const lLo = Math.max(0, -Math.log(sumNegL / sumW) / beta);
-    const lHi = Math.min(1,  Math.log(sumPosL / sumW) / beta);
-    const cLo = Math.max(0, -Math.log(sumNegC / sumW) / beta);
-    const cHi =              Math.log(sumPosC / sumW) / beta;
-    buf[i*4+0] = lLo;
-    buf[i*4+1] = lHi;
-    buf[i*4+2] = cLo;
-    buf[i*4+3] = cHi;
+    buf[i*4+0] = sL / sumW;
+    buf[i*4+1] = sC / sumW;
   }
   return buf;
 }
@@ -2219,13 +2341,12 @@ function makeLandscapeImage(){
   return cv;
 }
 
-// Hue picker test image: HPLuv hue × L sweep with chroma boosted past the
-// uniform-gamut floor and capped per-hue at HSLuv max. X axis = hue
-// [0°, 360°). Y axis = L (top L=100, bottom L=0). L stays perceptual per
-// row → no centerline stripe and no per-hue brightness bands. Boost = 1.5
-// gives ~50% more chroma than plain HPLuv while staying close to HPLuv's
-// uniformity (only the gamut-bottleneck hues, typically deep blue, get
-// clamped to their per-hue ceiling).
+// Hue picker test image: Okhsl hue × L sweep at full saturation.
+// X axis = hue [0°, 360°). Y axis = Okhsl lightness (top l=1 → white,
+// bottom l=0 → black). At s=1, each (h, l) sits exactly on the OkLab
+// sRGB-gamut boundary — every column is as chromatic as the gamut allows.
+// Okhsl's toed lightness keeps per-row brightness uniform; no centerline
+// stripe and no per-hue L bands (Björn Ottosson 2021).
 function makeHuePickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2237,7 +2358,7 @@ function makeHuePickerImage(){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 2.5);
+      const [r, g, b] = okhslToRgb(h, 1, L / 100);
       const idx = (y * W + x) * 4;
       data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
     }
@@ -2522,13 +2643,13 @@ let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
 function buildHuePreviewSrc(){
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   const buf = new Uint8ClampedArray(W * H * 4);
-  // HPLuv-boosted hue × L sweep — same generator as the main hue picker
-  // test image (uniform L per row, boosted chroma capped at per-hue gamut).
+  // Okhsl hue × L sweep — same generator as the main hue picker test image
+  // (per-hue OkLab-gamut max chroma at uniform toed lightness per row).
   for (let y = 0; y < H; y++){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 2.5);
+      const [r, g, b] = okhslToRgb(h, 1, L / 100);
       const i = (y * W + x) * 4;
       buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
