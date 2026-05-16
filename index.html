@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T22:06:17Z">
+<meta name="build" content="2026-05-16T22:32:41Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:06:17Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:32:41Z</span>
   </div>
 </header>
 
@@ -287,6 +287,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <section class="center">
   <div id="imageTabs" class="tabs">
     <button id="hueImage"       class="tab" title="Hue × Lightness gradient — at-a-glance palette coverage test">hues</button>
+    <button id="hsvImage"       class="tab" title="Literal HSV cylinder — reference image with the band artifacts (bright yellow / dark blue) for comparison">hsv ref</button>
     <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
     <button id="photoImage"     class="tab" title="Procedural still-life (apples on wood)">still-life</button>
     <button id="landscapeImage" class="tab" title="Procedural landscape — atmospheric depth, greens">landscape</button>
@@ -2413,6 +2414,50 @@ function makeHuePickerImage(){
   return cv;
 }
 
+// Reference image: literal HSV cylinder rendered straight to sRGB — same
+// math every "HSB" picker uses (Photoshop, GIMP, <input type=color>). Top
+// half = saturation ramp 0→1 at v=1 (white→hue); bottom half = value ramp
+// 1→0 at s=1 (hue→black). Pure RGB primaries land on the horizontal
+// centerline. Yellow / cyan / magenta show as bright vertical bands and the
+// centerline pops because HSV's V doesn't track perceptual lightness —
+// that's the artifact the smoothed Okhsl tab removes. Kept here for direct
+// visual comparison.
+function makeHsvReferenceImage(){
+  const W = 720, H = 460;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const data = img.data;
+  function hsvToRgb(h, s, v){
+    const c = v * s, hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1)      { r = c; g = x; }
+    else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; }
+    else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; }
+    else             { r = c; b = x; }
+    const m = v - c;
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  const half = H / 2;
+  for (let y = 0; y < H; y++){
+    let s, v;
+    if (y < half){ s = y / (half - 1); v = 1; }
+    else         { s = 1; v = 1 - (y - half) / (H - 1 - half); }
+    for (let x = 0; x < W; x++){
+      const h = (x / W) * 360;
+      const [r, g, b] = hsvToRgb(h, s, v);
+      const idx = (y * W + x) * 4;
+      data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 // Procedural anime-style scene: sunset sky, cel-shaded mountains, cherry
 // blossom branch, falling petals. Tests cel-shaded palettes (bold sakura
 // pink, sky cyan, mountain violet) and how palettes handle high-saturation
@@ -2562,6 +2607,9 @@ function loadDefaultImage(){
 }
 function loadHueImage(){
   installCanvas(makeHuePickerImage(), 'synthetic · hue picker');
+}
+function loadHsvRefImage(){
+  installCanvas(makeHsvReferenceImage(), 'synthetic · hsv reference');
 }
 function loadPhotoImage(){
   installCanvas(makePhotoImage(), 'synthetic · still life');
@@ -3308,6 +3356,7 @@ function init(){
   }
   bindImageBtn('resetImage',     loadDefaultImage);
   bindImageBtn('hueImage',       loadHueImage);
+  bindImageBtn('hsvImage',       loadHsvRefImage);
   bindImageBtn('photoImage',     loadPhotoImage);
   bindImageBtn('portraitImage',  loadPortraitImage);
   bindImageBtn('landscapeImage', loadLandscapeImage);
