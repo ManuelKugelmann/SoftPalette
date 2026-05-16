@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T19:37:09Z">
+<meta name="build" content="2026-05-16T19:42:22Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:37:09Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:42:22Z</span>
   </div>
 </header>
 
@@ -369,8 +369,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
     <div class="note" style="margin:6px 0 3px">hues · raw IDW <span style="color:var(--txdd)">(no luma look · reach · cRange)</span></div>
     <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
-    <div class="note" style="margin:6px 0 3px">LUT slice at L=0.5 <span style="color:var(--txdd)">(a→, b↑)</span></div>
-    <canvas id="lutSlicePreview" width="140" height="140" style="width:100%;max-width:140px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
+    <div class="note" style="margin:6px 0 3px">LUT slice <span style="color:var(--txdd)">(a→, b↑) at L=<span id="vLutSliceL">0.50</span></span></div>
+    <input type="range" id="lutSliceL" min="0" max="1" step="0.02" value="0.5" style="width:100%;margin-bottom:4px">
+    <canvas id="lutSlicePreview" width="160" height="160" style="width:100%;max-width:160px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
   </section>
 
   <section class="card">
@@ -498,6 +499,8 @@ const state = {
     // L-mean. Captures the teal-orange-style "cool shadows, warm highlights"
     // automatically from the palette's L→(a,b) profile.
     lumaLook: 0.0,
+    // Diagnostic: which L slice the LUT-slice preview shows. 0 dark, 1 bright.
+    lutSliceL: 0.5,
     // Per-axis blend back toward the input cell's own L/C — 0 snaps fully to
     // anchor, 1 passes input through unchanged (old-algorithm hue-snap behavior).
     // Lets the image's lightness/chroma structure survive the palette mapping
@@ -2300,35 +2303,116 @@ function rawIdwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
   return [Lo, Ao, Bo];
 }
 
+// One-time GPU resources for the GPU-rendered hues preview: the hue picker
+// source as a 2D texture, an offscreen RGBA8 render target + FBO at preview
+// size, and a CPU-side readback buffer.
+function _ensureHuePreviewGpu(){
+  const gl = state.gl;
+  if (state.huePreviewTex) return;
+  const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
+  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
+  // Source texture (hue picker bytes).
+  const srcCv = document.createElement('canvas');
+  srcCv.width = W; srcCv.height = H;
+  const srcCtx = srcCv.getContext('2d');
+  const srcImg = srcCtx.createImageData(W, H);
+  srcImg.data.set(_huePreviewSrc);
+  srcCtx.putImageData(srcImg, 0, 0);
+  state.huePreviewTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, state.huePreviewTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  // Render target + FBO.
+  state.huePreviewOutTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, state.huePreviewOutTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  state.huePreviewFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.huePreviewFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.huePreviewOutTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  state.huePreviewBuf = new Uint8Array(W * H * 4);
+}
+
+// Main hues preview — renders the hue picker source through the EXACT same
+// GPU per-pixel shader the test image uses, so the preview matches the test
+// image pixel-for-pixel (LUT trilinear, anchor stamps, all blur iters, etc.).
 function renderHuePreview(){
   const cv = document.getElementById('huePreview');
   if (!cv) return;
   const ctx = cv.getContext('2d');
-  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
-  const img = ctx.createImageData(W, H);
-  const dst = img.data;
-  const seeds = paletteSeeds();
-  if (seeds.length === 0){
-    dst.set(_huePreviewSrc);
+  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
+
+  // No LUT or empty palette → show raw hue picker source as-is.
+  if (!state.gl || !state.lutTex || state.palette.length === 0){
+    const img = ctx.createImageData(W, H);
+    img.data.set(_huePreviewSrc);
     ctx.putImageData(img, 0, 0);
     renderIdwPreview();
     renderLutSlicePreview();
     return;
   }
-  const { lTol, abTol, softness, lRange, cRange, reach, lumaLook } = state.params;
-  const realSeeds = seeds.filter(s => !s.synthetic);
-  const lumaCurve = lumaLook > 0 ? computeLumaCurve(realSeeds.length ? realSeeds : seeds) : null;
-  const src = _huePreviewSrc;
-  for (let i = 0; i < W * H; i++){
-    const o = i * 4;
-    const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
-    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange, reach, lumaCurve, lumaLook);
-    _writeLabToRGBA(dst, o, oL, oa, ob);
+
+  const gl = state.gl;
+  _ensureHuePreviewGpu();
+
+  // Render through per-pixel shader to offscreen FBO.
+  const prog = state.programs.perPixel;
+  gl.useProgram(prog);
+  gl.bindVertexArray(state.vao);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.huePreviewFbo);
+  gl.viewport(0, 0, W, H);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, state.huePreviewTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uImg'), 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLut3D'), 1);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uPalN'), Math.min(state.palette.length, MAX_PAL));
+  gl.uniform1f(gl.getUniformLocation(prog, 'uSplit'), 0);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uStrength'), state.params.lutStrength);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, state.huePreviewBuf);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // GL framebuffer y=0 is at the bottom; canvas2D y=0 is at the top → flip
+  // vertically when copying into the canvas via putImageData.
+  const img = ctx.createImageData(W, H);
+  const dst = img.data;
+  const src = state.huePreviewBuf;
+  for (let y = 0; y < H; y++){
+    const srcRow = (H - 1 - y) * W * 4;
+    const dstRow = y * W * 4;
+    dst.set(src.subarray(srcRow, srcRow + W * 4), dstRow);
   }
   ctx.putImageData(img, 0, 0);
+
   renderIdwPreview();
   renderLutSlicePreview();
+}
+
+// Filled circle in the current 2D context, used as an anchor marker on the
+// diagnostic preview canvases. Color is built from the anchor's Lab.
+function _drawAnchorDot(ctx, cx, cy, L, a, b, r){
+  const lin = oklabToLinearJS(L, a, b);
+  const rR = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[0]))) * 255)));
+  const gG = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[1]))) * 255)));
+  const bB = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[2]))) * 255)));
+  // Black outline for contrast on any background.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 0.6, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = `rgb(${rR},${gG},${bB})`;
+  ctx.fill();
 }
 
 function renderIdwPreview(){
@@ -2350,11 +2434,24 @@ function renderIdwPreview(){
     _writeLabToRGBA(dst, o, oL, oa, ob);
   }
   ctx.putImageData(img, 0, 0);
+  // Anchor markers: map each anchor to its position on the hue picker
+  // representation. x ← hue (0..360°), y ← L (top = bright, bot = dark).
+  for (const p of state.palette){
+    const [rr, gg, bb] = hexToRgb(p.hex);
+    const lab = rgbToOklab(rr, gg, bb);
+    const C = Math.hypot(lab[1], lab[2]);
+    if (C < 0.005) continue;  // skip greys (no defined hue position)
+    let hueDeg = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+    if (hueDeg < 0) hueDeg += 360;
+    const x = (hueDeg / 360) * W;
+    const y = (1 - lab[0]) * (H - 1);  // top=bright(L=1), bot=dark(L=0)
+    _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], 3.5);
+  }
 }
 
-// LUT slice preview: 2D plane at fixed L (default 0.5). x→a, y→b. Renders the
-// FULL pipeline output for each (a, b) at that L — shows how the algorithm
-// partitions the chroma plane into anchor regions at midtone.
+// LUT slice preview: 2D plane at user-selected L (state.params.lutSliceL).
+// x→a, y→b. Each anchor whose L is close to the slice is marked with a
+// filled dot at its (a, b) projection; further-L anchors get smaller dots.
 function renderLutSlicePreview(){
   const cv = document.getElementById('lutSlicePreview');
   if (!cv) return;
@@ -2367,9 +2464,8 @@ function renderLutSlicePreview(){
   const par = state.params;
   const real = seeds.filter(s => !s.synthetic);
   const lumaCurve = par.lumaLook > 0 ? computeLumaCurve(real.length ? real : seeds) : null;
-  const L = 0.5;
+  const L = Math.max(0, Math.min(1, par.lutSliceL));
   for (let y = 0; y < H; y++){
-    // canvas y=0 at top → b=+R; canvas y=H-1 at bot → b=−R
     const b = LUT_AB_RANGE - (y / (H - 1)) * 2 * LUT_AB_RANGE;
     for (let x = 0; x < W; x++){
       const a = -LUT_AB_RANGE + (x / (W - 1)) * 2 * LUT_AB_RANGE;
@@ -2378,6 +2474,20 @@ function renderLutSlicePreview(){
     }
   }
   ctx.putImageData(img, 0, 0);
+  // Anchor markers — dot size shrinks with L distance from the slice so the
+  // user can see which anchors are most influential at this depth.
+  for (const p of state.palette){
+    const [rr, gg, bb] = hexToRgb(p.hex);
+    const lab = rgbToOklab(rr, gg, bb);
+    const C = Math.hypot(lab[1], lab[2]);
+    const x = ((lab[1] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE)) * (W - 1);
+    const y = ((-lab[2] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE)) * (H - 1);
+    const dL = Math.abs(lab[0] - L);
+    const r = Math.max(1.5, 4.5 - dL * 6);   // closer L → bigger marker
+    _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], r);
+    // Tiny inner dot at low chroma so the marker stays visible at the origin too.
+    if (C < 0.02) _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], 1.5);
+  }
 }
 
 /* =========================================================
@@ -2785,34 +2895,40 @@ function init(){
   bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
+  // LUT-slice L picker (diagnostic) — re-renders the slice preview only.
+  (function bindLutSliceL(){
+    const inp = document.getElementById('lutSliceL');
+    const lbl = document.getElementById('vLutSliceL');
+    if (!inp || !lbl) return;
+    inp.value = state.params.lutSliceL;
+    lbl.textContent = state.params.lutSliceL.toFixed(2);
+    inp.addEventListener('input', () => {
+      state.params.lutSliceL = parseFloat(inp.value);
+      lbl.textContent = state.params.lutSliceL.toFixed(2);
+      renderLutSlicePreview();
+    });
+  })();
+
   // LUT param presets — three named operating points along the soft/hard axis.
-  // LUT presets — six points from "barely tint" to "fully posterize." All
-  // include at least one blur+stamp smoothness iteration. softness is stored
-  // as the internal IDW exponent (1=mushy, 12=hard); the slider displays the
-  // inverse so higher slider position = softer.
+  // LUT presets — five named looks, every one carries a baseline of luma
+  // look so shadows/highlights pick up the palette's L-conditional tint.
+  // softness is stored as the internal IDW exponent (1=mushy, 12=hard);
+  // the slider displays the inverse so higher slider position = softer.
   const lutPresets = {
-    // Wash: deliberately faded — low output chroma, palette tints subtly,
-    // image lightness flows through. Soft IDW blends many anchors so chroma
-    // averages downward, low cRange keeps anchor chroma authority (which is
-    // typically lower than input chroma), tighter reach gently desaturates
-    // far cells. Result reads like a vintage/muted filter.
-    'wash':      { lTol: 0.8, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, smoothness: 2 },
-    // Gentle: smooth IDW blend, image structure clear, palette tints visibly.
-    'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2 },
-    // Middle of the road.
-    'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, smoothness: 2 },
-    // Sharp hue separation, wide L acceptance, HIGH chroma passthrough so
-    // saturated inputs stay saturated — palette carves crisp hue regions
-    // and image chroma flows through unmuted.
-    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, smoothness: 2 },
-    // Hard: short gradients between palette hues. Max IDW exponent
-    // (softness=12) + tight σ_ab give very narrow transition zones at
-    // anchor boundaries — each palette region reads as a flat-ish band of
-    // its hue, with abrupt switches between them. cRange=0.6 keeps chroma
-    // closer to input so the bands stay saturated. lRange=1.0 preserves
-    // image lightness. Minimal smoothness (1 iter) so blur doesn't widen
-    // the transitions.
-    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.6, reach: 0.40, smoothness: 1 },
+    // Wash: faded vintage — low output chroma, subtle cinematic tint.
+    'wash':      { lTol: 0.8, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, smoothness: 2, lumaLook: 0.30 },
+    // Soft: gentle IDW blend, image structure clear, moderate cinematic feel.
+    'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2, lumaLook: 0.35 },
+    // Balanced: middle of the road.
+    'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, smoothness: 2, lumaLook: 0.25 },
+    // Vivid: sharp hue separation, high chroma passthrough so saturated
+    // inputs stay punchy. Minimal luma look so the palette's own hues
+    // dominate without strong shadow/highlight rebias.
+    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, smoothness: 2, lumaLook: 0.10 },
+    // Hard: short gradients between palette hues — near-Voronoi cells with
+    // tight σ_ab. Strong luma look pushes shadows/highlights firmly into
+    // palette's dark/light tints, the "filmic graphic" feel.
+    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.6,  reach: 0.40, smoothness: 1, lumaLook: 0.50 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
