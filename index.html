@@ -50,9 +50,20 @@ aside.right{padding-right:24px}
 .card h2{
   margin:0 0 10px;font-size:10px;font-weight:500;
   text-transform:uppercase;letter-spacing:0.18em;color:var(--txd);
-  display:flex;justify-content:space-between;align-items:center;
+  display:flex;align-items:center;
+  cursor:pointer;user-select:none;
 }
-.card h2 .badge{font-size:9px;color:var(--txdd);letter-spacing:0.1em}
+.card h2::before{
+  content:"\25BE";  /* down-pointing triangle */
+  font-size:10px;color:var(--txdd);margin-right:6px;
+  display:inline-block;transition:transform 0.15s;
+}
+.card h2:hover{color:var(--ac)}
+.card h2:hover::before{color:var(--ac)}
+.card.collapsed h2{margin-bottom:0}
+.card.collapsed h2::before{transform:rotate(-90deg)}
+.card.collapsed > *:not(h2){display:none}
+.card h2 .badge{font-size:9px;color:var(--txdd);letter-spacing:0.1em;margin-left:auto}
 
 button,.btn{
   background:transparent;border:1px solid var(--bd);color:var(--tx);
@@ -256,11 +267,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button id="extractColors">extract from image</button>
       <button id="clearPalette">clear</button>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+  </section>
+
+  <section class="card" data-collapsed-default="true">
+    <h2>extend palette</h2>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="extendPalette">
       <span>auto-extend <span style="color:var(--txdd)">spread each anchor in L and C</span></span>
     </label>
-    <div class="slider" id="extendGridWrap" style="margin-top:6px">
+    <div class="slider" id="extendGridWrap" style="margin-top:8px">
       <div class="lbl"><span>grid <span style="color:var(--txdd)">entries per anchor</span></span><span class="v" id="vExtendGrid">3×3 = 9</span></div>
       <input type="range" id="extendGrid" min="0" max="3" step="1" value="1">
     </div>
@@ -2183,6 +2198,25 @@ function wireSlider(id, key, fmt = v => v.toFixed(2), label = id){
 function init(){
   initGL();
   renderSwatches();
+
+  // Foldable cards: clicking the h2 toggles a .collapsed class. State persists
+  // in localStorage keyed by the card's h2 text (so survives reload). Cards
+  // marked data-collapsed-default="true" start folded unless overridden.
+  let foldState = {};
+  try { foldState = JSON.parse(localStorage.getItem('softpalette.folds') || '{}'); } catch(e){}
+  document.querySelectorAll('section.card').forEach(card => {
+    const h2 = card.querySelector('h2');
+    if (!h2) return;
+    const key = (h2.firstChild?.textContent || h2.textContent).trim();
+    const stored = foldState[key];
+    const startCollapsed = stored !== undefined ? stored : card.dataset.collapsedDefault === 'true';
+    if (startCollapsed) card.classList.add('collapsed');
+    h2.addEventListener('click', () => {
+      card.classList.toggle('collapsed');
+      foldState[key] = card.classList.contains('collapsed');
+      try { localStorage.setItem('softpalette.folds', JSON.stringify(foldState)); } catch(e){}
+    });
+  });
 
   // Image input
   const dz = document.getElementById('dropzone');
