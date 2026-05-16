@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T21:09:48Z">
+<meta name="build" content="2026-05-16T21:14:51Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T21:09:48Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T21:14:51Z</span>
   </div>
 </header>
 
@@ -2237,7 +2237,7 @@ function makeHuePickerImage(){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 1.5);
+      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 2.5);
       const idx = (y * W + x) * 4;
       data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
     }
@@ -2528,7 +2528,7 @@ function buildHuePreviewSrc(){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 1.5);
+      const [r, g, b] = hpluvBoostedToRgb(h, 100, L, 2.5);
       const i = (y * W + x) * 4;
       buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
