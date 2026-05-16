@@ -23,8 +23,9 @@ construction.
 | Section | What it does |
 |---|---|
 | **image** | Drop, paste (Ctrl+V), click to browse, or pick a built-in test image |
-| **presets** | Curated palette presets — click to apply. `SlimQuake` is a hue-deduped subset of `FullQuake` |
+| **presets** | Curated palette presets — click to apply. `Quake256` is the full canonical 256-entry Quake 1 palette (gfx/palette.lmp); `FullQuake` is its 28-entry hue-binned subset; `SlimQuake` is a hue-deduped subset of `FullQuake` |
 | **palette** | Swatch grid (left column). Edit hex, delete, add new, extract from current image, or clear. Up to 256 anchors |
+| **extend palette** | Optional auto-extension: each palette anchor stamps an N×N (L, C) constellation at its hue. `grid` chooses 1 (off), 3 (9 entries / anchor), 5, or 7. `L spread` and `chroma spread` set the ±range per axis. Total seeds are capped to 256 |
 | **lut params · presets row** | `soft` · `balanced` · `hard` — bundled (σ_L, σ_ab, softness) operating points |
 | **lut size** | Cube edge: 17 / 33 / 65 / 129 / 257 (production-standard sizes; odd values keep neutral grey cell-centered) |
 | **L tolerance (σ_L)** | Anchor's pull radius along the L axis. Small = tight luminance "stripe", large = anchor reaches across the L range |

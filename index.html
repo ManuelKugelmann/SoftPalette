@@ -245,6 +245,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="solarized" title="Ethan Schoonover's 8 accent hues">solarized</button>
       <button data-preset="nord" title="Nord — frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — vivid neon accents">dracula</button>
+      <button data-preset="Quake256" title="Full canonical 256-entry Quake 1 palette (gfx/palette.lmp)">Quake256</button>
       <button data-preset="FullQuake">FullQuake</button>
       <button data-preset="SlimQuake" title="Reduced quake palette — near-duplicate hues collapsed">SlimQuake</button>
     </div>
@@ -275,6 +276,27 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 <!-- RIGHT -->
 <aside class="right">
+  <section class="card">
+    <h2>extend palette</h2>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="extendPalette">
+      <span>auto-extend <span style="color:var(--txdd)">spread each anchor in L and C</span></span>
+    </label>
+    <div class="slider" id="extendGridWrap" style="margin-top:8px">
+      <div class="lbl"><span>grid <span style="color:var(--txdd)">entries per anchor</span></span><span class="v" id="vExtendGrid">3×3 = 9</span></div>
+      <input type="range" id="extendGrid" min="0" max="3" step="1" value="1">
+    </div>
+    <div class="slider" id="extendLSpreadWrap" style="margin-top:6px">
+      <div class="lbl"><span>L spread <span style="color:var(--txdd)">±L offset</span></span><span class="v" id="vExtendLSpread">0.10</span></div>
+      <input type="range" id="extendLSpread" min="0" max="0.5" step="0.01" value="0.10">
+    </div>
+    <div class="slider" id="extendCSpreadWrap" style="margin-top:6px">
+      <div class="lbl"><span>chroma spread <span style="color:var(--txdd)">±C offset</span></span><span class="v" id="vExtendCSpread">0.050</span></div>
+      <input type="range" id="extendCSpread" min="0" max="0.3" step="0.005" value="0.05">
+    </div>
+    <div class="note" id="extendStatus" style="margin-top:6px"></div>
+  </section>
+
   <section class="card">
     <h2>lut parameters</h2>
     <div class="row full" style="margin-bottom:8px">
@@ -360,6 +382,45 @@ const PRESETS = {
   // (#dfab27,#efcb1f), two of three dark greens, near-white cyan, second
   // dark blue (#8b8bcb), and the mauve neutral (#9f7f97).
   'SlimQuake':   ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
+  // Full 256-entry canonical Quake 1 palette (gfx/palette.lmp, byte-exact).
+  // Indices 0-15 greys, 16-31 brown ramp, 32-47 dusk-blue ramp, 48-63 olive,
+  // 64-79 red ramp, 80-95 amber, 96-111 fire (yellow-orange-red), 112-127 tan,
+  // 128-143 muted purple, 144-159 magenta, 160-175 cream/sand, 176-191 forest,
+  // 192-207 yellow ramp, 208-223 blue ramp, 224-239 oranges, 240-255 brights.
+  'Quake256':    [
+    '#000000','#0f0f0f','#1f1f1f','#2f2f2f','#3f3f3f','#4b4b4b','#5b5b5b','#6b6b6b',
+    '#7b7b7b','#8b8b8b','#9b9b9b','#ababab','#bbbbbb','#cbcbcb','#dbdbdb','#ebebeb',
+    '#0f0b07','#170f0b','#1f170b','#271b0f','#2f2313','#372b17','#3f2f17','#4b371b',
+    '#533b1b','#5b431f','#634b1f','#6b531f','#73571f','#7b5f23','#836723','#8f6f23',
+    '#0b0b0f','#13131b','#1b1b27','#272733','#2f2f3f','#37374b','#3f3f57','#474767',
+    '#4f4f73','#5b5b7f','#63638b','#6b6b97','#7373a3','#7b7baf','#8383bb','#8b8bcb',
+    '#000000','#070700','#0b0b00','#131300','#1b1b00','#232300','#2b2b07','#2f2f07',
+    '#373707','#3f3f07','#474707','#4b4b0b','#53530b','#5b5b0b','#63630b','#6b6b0f',
+    '#070000','#0f0000','#170000','#1f0000','#270000','#2f0000','#370000','#3f0000',
+    '#470000','#4f0000','#570000','#5f0000','#670000','#6f0000','#770000','#7f0000',
+    '#131300','#1b1b00','#232300','#2f2b00','#372f00','#433700','#4b3b07','#574307',
+    '#5f4707','#6b4b0b','#77530f','#835713','#8b5b13','#975f1b','#a3631f','#af6723',
+    '#231307','#2f170b','#3b1f0f','#4b2313','#572b17','#632f1f','#733723','#7f3b2b',
+    '#8f4333','#9f4f33','#af632f','#bf772f','#cf8f2b','#dfab27','#efcb1f','#fff31b',
+    '#0b0700','#1b1300','#2b230f','#372b13','#47331b','#533723','#633f2b','#6f4733',
+    '#7f533f','#8b5f47','#9b6b53','#a77b5f','#b7876b','#c3937b','#d3a38b','#e3b397',
+    '#ab8ba3','#9f7f97','#937387','#8b677b','#7f5b6f','#775363','#6b4b57','#5f3f4b',
+    '#573743','#4b2f37','#43272f','#371f23','#2b171b','#231313','#170b0b','#0f0707',
+    '#bb739f','#af6b8f','#a35f83','#975777','#8b4f6b','#7f4b5f','#734353','#6b3b4b',
+    '#5f333f','#532b37','#47232b','#3b1f23','#2f171b','#231313','#170b0b','#0f0707',
+    '#dbc3bb','#cbb3a7','#bfa39b','#af978b','#a3877b','#977b6f','#876f5f','#7b6353',
+    '#6b5747','#5f4b3b','#533f33','#433327','#372b1f','#271f17','#1b130f','#0f0b07',
+    '#6f837b','#677b6f','#5f7367','#576b5f','#4f6357','#475b4f','#3f5347','#374b3f',
+    '#2f4337','#2b3b2f','#233327','#1f2b1f','#172317','#0f1b13','#0b130b','#070b07',
+    '#fff31b','#efdf17','#dbcb13','#cbb70f','#bba70f','#ab970b','#9b8307','#8b7307',
+    '#7b6307','#6b5300','#5b4700','#4b3700','#3b2b00','#2b1f00','#1b0f00','#0b0700',
+    '#0000ff','#0b0bef','#1313df','#1b1bcf','#2323bf','#2b2baf','#2f2f9f','#2f2f8f',
+    '#2f2f7f','#2f2f6f','#2f2f5f','#2b2b4f','#23233f','#1b1b2f','#13131f','#0b0b0f',
+    '#2b0000','#3b0000','#4b0700','#5f0700','#6f0f00','#7f1707','#931f07','#a3270b',
+    '#b7330f','#c34b1b','#cf632b','#db7f3b','#e3974f','#e7ab5f','#efbf77','#f7d38b',
+    '#a77b3b','#b79b37','#c7c337','#e7e357','#7fbfff','#abe7ff','#d7ffff','#670000',
+    '#8b0000','#b30000','#d70000','#ff0000','#fff393','#fff7c7','#ffffff','#9f5b53',
+  ],
 };
 
 const state = {
@@ -386,6 +447,13 @@ const state = {
     abTol: 0.2,          // σab — A/B axes falloff (OkLab radius scale)
     softness: 4,         // IDW power exponent; 1=linear, ∞=hard nearest
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
+    // Auto-extend: synthesize a grid of (L, C) variants around each anchor.
+    // Each real anchor stamps an N×N constellation at its hue: L offset ±lSpread,
+    // chroma offset ±cSpread. Grid=1 disables (no synth). Result capped at MAX_PAL.
+    extendPalette: false,
+    extendLSpread: 0.10, // half-range in L (0..0.5)
+    extendCSpread: 0.05, // half-range in C (0..0.3)
+    extendGrid:    3,    // 1, 3, 5, 7 (N steps per axis → N² entries per anchor)
   },
   gl: null, vao: null, programs: {},
   // ext_color_buffer_float availability — set in initGL
@@ -467,15 +535,42 @@ function rgbToOklab(r,g,b){
        (Lab-space trilinear — perceptually correct, no manual interpolation).
 */
 
-// Build palette seed list as OkLab tuples.
+// Build palette seed list as OkLab tuples. Optionally extends each anchor into
+// an N×N (L, C) grid — extra seeds at offset L and offset chroma along the
+// anchor's own hue direction. Grey anchors (C≈0) get only the L spread.
+// Output is capped at MAX_PAL: large palettes with extension fill the seed
+// texture in palette order then stop, so the final anchors won't expand.
 function paletteSeeds(){
-  const seeds = [];
+  const real = [];
   for (const p of state.palette){
     const [r,g,b] = hexToRgb(p.hex);
     const lab = rgbToOklab(r, g, b);
-    seeds.push({L: lab[0], a: lab[1], b: lab[2], strength: p.strength});
+    real.push({L: lab[0], a: lab[1], b: lab[2], strength: p.strength});
   }
-  return seeds;
+  const par = state.params;
+  const grid = par.extendPalette ? Math.max(1, Math.round(par.extendGrid)) : 1;
+  if (grid <= 1) return real.slice(0, MAX_PAL);
+
+  const half  = (grid - 1) / 2;
+  const lStep = par.extendLSpread / half;
+  const cStep = par.extendCSpread / half;
+  const out = [];
+  for (const s of real){
+    if (out.length >= MAX_PAL) break;
+    const C0 = Math.hypot(s.a, s.b);
+    const hx = C0 > 1e-6 ? s.a / C0 : 0;
+    const hy = C0 > 1e-6 ? s.b / C0 : 0;
+    for (let li = -half; li <= half; li++){
+      if (out.length >= MAX_PAL) break;
+      for (let ci = -half; ci <= half; ci++){
+        if (out.length >= MAX_PAL) break;
+        const L    = Math.max(0, Math.min(1, s.L + li * lStep));
+        const Cnew = Math.max(0, C0 + ci * cStep);
+        out.push({L, a: hx * Cnew, b: hy * Cnew, strength: s.strength});
+      }
+    }
+  }
+  return out;
 }
 
 // Pack seeds into the row-1 Float32 buffer (rgb=Lab, a=strength).
@@ -1692,7 +1787,20 @@ function updateSplitLine(){
    ========================================================= */
 function paletteChanged(){
   recomputeLut();
+  updateExtendStatus();
   requestRender();
+}
+
+// "P × G² = N (capped to MAX_PAL)" — reflects current palette size × grid.
+function updateExtendStatus(){
+  const el = document.getElementById('extendStatus');
+  if (!el) return;
+  const par = state.params;
+  const palN = state.palette.length;
+  if (!par.extendPalette || palN === 0){ el.textContent = ''; return; }
+  const grid   = Math.max(1, Math.round(par.extendGrid));
+  const wanted = palN * grid * grid;
+  el.textContent = `${palN} × ${grid*grid} = ${wanted}${wanted > MAX_PAL ? ` (capped to ${MAX_PAL})` : ''}`;
 }
 
 function renderSwatches(){
@@ -1929,6 +2037,66 @@ function init(){
   }
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
     btn.addEventListener('click', () => applyLutPreset(btn.dataset.lutpreset));
+  });
+
+  // Extend-palette controls.
+  // Grid slider exposes 1/3/5/7 — discrete values, displayed as N×N.
+  const EXTEND_GRID_VALUES = [1, 3, 5, 7];
+  const extendGridInp = document.getElementById('extendGrid');
+  const vExtendGrid   = document.getElementById('vExtendGrid');
+  const extendLInp    = document.getElementById('extendLSpread');
+  const vExtendL      = document.getElementById('vExtendLSpread');
+  const extendCInp    = document.getElementById('extendCSpread');
+  const vExtendC      = document.getElementById('vExtendCSpread');
+  const extendCb      = document.getElementById('extendPalette');
+  const extendGridWrap     = document.getElementById('extendGridWrap');
+  const extendLSpreadWrap  = document.getElementById('extendLSpreadWrap');
+  const extendCSpreadWrap  = document.getElementById('extendCSpreadWrap');
+  function gridLabel(g){ return g <= 1 ? '1 (off)' : `${g}×${g} = ${g*g}`; }
+  function refreshExtendUI(){
+    const on = state.params.extendPalette;
+    const op = on ? '1' : '0.4';
+    const pe = on ? 'auto' : 'none';
+    for (const el of [extendGridWrap, extendLSpreadWrap, extendCSpreadWrap]){
+      el.style.opacity = op;
+      el.style.pointerEvents = pe;
+    }
+    updateExtendStatus();
+  }
+  function setExtendGridFromIdx(idx){
+    const g = EXTEND_GRID_VALUES[Math.max(0, Math.min(EXTEND_GRID_VALUES.length - 1, idx))];
+    state.params.extendGrid = g;
+    vExtendGrid.textContent = gridLabel(g);
+  }
+  // Initialize widgets from state.params
+  extendCb.checked = state.params.extendPalette;
+  extendGridInp.value = EXTEND_GRID_VALUES.indexOf(state.params.extendGrid);
+  setExtendGridFromIdx(parseInt(extendGridInp.value, 10));
+  extendLInp.value = state.params.extendLSpread;
+  vExtendL.textContent = state.params.extendLSpread.toFixed(2);
+  extendCInp.value = state.params.extendCSpread;
+  vExtendC.textContent = state.params.extendCSpread.toFixed(3);
+  refreshExtendUI();
+
+  extendCb.addEventListener('change', () => {
+    state.params.extendPalette = extendCb.checked;
+    refreshExtendUI();
+    scheduleLutRebuild();
+  });
+  extendGridInp.addEventListener('input', () => {
+    setExtendGridFromIdx(parseInt(extendGridInp.value, 10));
+    refreshExtendUI();
+    scheduleLutRebuild();
+  });
+  extendLInp.addEventListener('input', () => {
+    state.params.extendLSpread = parseFloat(extendLInp.value);
+    vExtendL.textContent = state.params.extendLSpread.toFixed(2);
+    scheduleLutRebuild();
+  });
+  extendCInp.addEventListener('input', () => {
+    state.params.extendCSpread = parseFloat(extendCInp.value);
+    vExtendC.textContent = state.params.extendCSpread.toFixed(3);
+    scheduleLutRebuild();
   });
 
   // Split: drag anywhere on the canvas to move the split line.
