@@ -101,16 +101,7 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
 .slider .lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--txd);margin-bottom:2px;letter-spacing:0.06em}
 .slider .lbl .v{color:var(--ac);font-variant-numeric:tabular-nums}
 
-#dropzone{
-  border:1px dashed var(--bd2);padding:8px 10px;text-align:center;
-  color:var(--txd);cursor:pointer;font-size:10px;letter-spacing:0.04em;
-  transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;
-}
-#dropzone:hover,#dropzone.over{border-color:var(--ac);color:var(--ac);background:rgba(95,214,163,0.04)}
-#dropzone .big{font-size:13px;display:inline}
-#imageInfo{font-size:10px;color:var(--txd);margin-top:8px;line-height:1.7}
-#imageInfo .k{color:var(--txdd)}
-#imageInfo .v{color:var(--tx)}
+#imageInfo{font-size:10px;color:var(--txd)}
 
 /* Swatch grid: one row per hue (chromatic anchors bucketed into 16 hue bins,
    neutrals on their own row), each row flex-packed left at 16 cells wide.
@@ -129,15 +120,37 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
   border:0;padding:0;
 }
 
+/* Image source tabs: horizontal row above the canvas. Selected one shows
+   accent border/color. Overflow scrolls horizontally on narrow viewports. */
+.tabs{
+  display:flex;gap:2px;overflow-x:auto;flex-wrap:wrap;
+  padding-bottom:0;
+}
+.tabs .tab{
+  font-size:11px;padding:6px 10px;white-space:nowrap;
+  border:1px solid var(--bd);background:transparent;color:var(--tx);
+  border-bottom-color:transparent;
+}
+.tabs .tab:hover{border-color:var(--ac);color:var(--ac);background:var(--bg3)}
+.tabs .tab.selected{
+  background:var(--bg2);color:var(--ac);
+  border-color:var(--bd);border-bottom-color:var(--bg2);
+}
+.tabs .tab-file{margin-left:auto;border-style:dashed}
+
 #canvasWrap{
   position:relative;background:var(--bg2);border:1px solid var(--bd);
   flex:1;display:flex;align-items:center;justify-content:center;
   overflow:hidden;min-height:300px;
   touch-action:none;user-select:none;-webkit-user-select:none;
 }
+#canvasWrap.empty{cursor:pointer}
 #canvasWrap.empty::before{
-  content:"⬡ no image loaded";color:var(--txdd);font-size:11px;letter-spacing:0.1em;
+  content:"⬇  drop · click · paste an image";
+  color:var(--txdd);font-size:13px;letter-spacing:0.1em;
 }
+#canvasWrap.over{border-color:var(--ac);background:var(--bg3)}
+#canvasWrap.over::before{color:var(--ac)}
 #canvas{display:block;max-width:100%;max-height:100%;image-rendering:auto}
 #canvasWrap.empty #canvas{display:none}
 
@@ -218,26 +231,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- LEFT -->
 <aside>
   <section class="card">
-    <h2>image</h2>
-    <div id="dropzone">
-      <span class="big">⬇</span>
-      drop · click · paste
-    </div>
-    <input type="file" id="fileInput" accept="image/*" hidden>
-    <div class="row tight" style="margin-top:8px">
-      <button id="hueImage" title="Hue × Lightness gradient — at-a-glance palette coverage test">hues</button>
-      <button id="resetImage" title="Procedural sunset">sunset</button>
-      <button id="photoImage" title="Procedural still-life (apples on wood)">still-life</button>
-      <button id="landscapeImage" title="Procedural landscape — atmospheric depth, greens">landscape</button>
-      <button id="animeImage" title="Procedural anime-style scene — sakura, cel-shaded mountains">anime</button>
-      <button id="portraitImage" title="Real photo: Kodak kodim04 (skin tones, red fabric)">portrait</button>
-      <button id="natureImage" title="Real photo: Kodak kodim13 (alpine stream, foliage, sky)">nature</button>
-      <button id="parrotsImage" title="Real photo: Kodak kodim23 (vivid macaws — high saturation, full hue circle)">parrots</button>
-    </div>
-    <div id="imageInfo"></div>
-  </section>
-
-  <section class="card">
     <h2>presets</h2>
     <div class="row tight">
       <button data-preset="teal-orange">teal·orange</button>
@@ -294,12 +287,25 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 <!-- CENTER -->
 <section class="center">
+  <div id="imageTabs" class="tabs">
+    <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
+    <button id="hueImage"       class="tab" title="Hue × Lightness gradient — at-a-glance palette coverage test">hues</button>
+    <button id="photoImage"     class="tab" title="Procedural still-life (apples on wood)">still-life</button>
+    <button id="landscapeImage" class="tab" title="Procedural landscape — atmospheric depth, greens">landscape</button>
+    <button id="animeImage"     class="tab" title="Procedural anime-style scene — sakura, cel-shaded mountains">anime</button>
+    <button id="portraitImage"  class="tab" title="Real photo: Kodak kodim04 (skin tones, red fabric)">portrait</button>
+    <button id="natureImage"    class="tab" title="Real photo: Kodak kodim13 (alpine stream, foliage, sky)">nature</button>
+    <button id="parrotsImage"   class="tab" title="Real photo: Kodak kodim23 (vivid macaws — high saturation, full hue circle)">parrots</button>
+    <button id="loadFile"       class="tab tab-file" title="Click to browse, or drop / paste an image onto the canvas">file…</button>
+  </div>
   <div id="canvasWrap" class="empty">
     <canvas id="canvas"></canvas>
     <div id="splitLine"><div id="splitHandle"></div></div>
   </div>
+  <input type="file" id="fileInput" accept="image/*" hidden>
   <div id="bottomBar">
-    <span class="stat" id="renderStat">—</span>
+    <span class="stat" id="imageInfo"></span>
+    <span class="stat" id="renderStat" style="margin-left:auto">—</span>
   </div>
 </section>
 
@@ -1879,8 +1885,8 @@ function loadParrotsImage(){
 
 function updateImageInfo(){
   const el = document.getElementById('imageInfo');
-  if (!state.image){ el.innerHTML = ''; return; }
-  el.innerHTML = `<span class="k">file</span> <span class="v">${state.imageName}</span>`;
+  if (!state.image){ el.textContent = ''; return; }
+  el.textContent = state.imageName;
 }
 
 /* =========================================================
@@ -2292,17 +2298,26 @@ function init(){
     });
   });
 
-  // Image input
-  const dz = document.getElementById('dropzone');
-  const fi = document.getElementById('fileInput');
-  dz.addEventListener('click', () => fi.click());
+  // Image input — drop / click / paste all target the canvas area directly.
+  // The "file…" tab opens the file picker. While the canvas is empty, clicking
+  // it also opens the picker (so the drop-hint text is interactive).
+  const cvWrap = document.getElementById('canvasWrap');
+  const fi     = document.getElementById('fileInput');
+  document.getElementById('loadFile').addEventListener('click', () => fi.click());
+  cvWrap.addEventListener('click', e => {
+    if (cvWrap.classList.contains('empty')) fi.click();
+  });
   fi.addEventListener('change', e => {
     if (e.target.files[0]){ setSelectedImageBtn(null); loadImageFromFile(e.target.files[0]); }
   });
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-  dz.addEventListener('drop', e => {
-    e.preventDefault(); dz.classList.remove('over');
+  cvWrap.addEventListener('dragover', e => { e.preventDefault(); cvWrap.classList.add('over'); });
+  cvWrap.addEventListener('dragleave', e => {
+    // Only clear the highlight when the drag actually leaves the wrap, not
+    // when it crosses over a child element (those fire dragleave too).
+    if (e.target === cvWrap) cvWrap.classList.remove('over');
+  });
+  cvWrap.addEventListener('drop', e => {
+    e.preventDefault(); cvWrap.classList.remove('over');
     if (e.dataTransfer.files[0]){ setSelectedImageBtn(null); loadImageFromFile(e.dataTransfer.files[0]); }
   });
   window.addEventListener('paste', e => {
