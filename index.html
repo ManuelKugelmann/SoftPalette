@@ -2606,8 +2606,12 @@ function init(){
   // as the internal IDW exponent (1=mushy, 12=hard); the slider displays the
   // inverse so higher slider position = softer.
   const lutPresets = {
-    // Extreme soft: image dominates, palette adds a faint wash of color.
-    'wash':      { lTol: 1.0, abTol: 0.40, softness: 1.0,  lRange: 1.0, cRange: 0.85, reach: 0.40, smoothness: 1 },
+    // Wash: deliberately faded — low output chroma, palette tints subtly,
+    // image lightness flows through. Soft IDW blends many anchors so chroma
+    // averages downward, low cRange keeps anchor chroma authority (which is
+    // typically lower than input chroma), tighter reach gently desaturates
+    // far cells. Result reads like a vintage/muted filter.
+    'wash':      { lTol: 0.8, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, smoothness: 2 },
     // Gentle: smooth IDW blend, image structure clear, palette tints visibly.
     'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2 },
     // Middle of the road.
@@ -2615,13 +2619,14 @@ function init(){
     // Sharp hue separation, wide L acceptance — palette carves crisp hue
     // regions while image lightness flows through.
     'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.40, reach: 0.30, smoothness: 2 },
-    // Hard / near-Voronoi: high IDW exponent snaps each cell to its nearest
-    // anchor's hue direction. Image L preserved (lRange=1.0). Chroma keeps
-    // most of the input magnitude (cRange=0.6) so the output stays crisp
-    // AND saturated — the "hard" feel is from sharp hue boundaries between
-    // anchor regions, not from forcing every cell to the (often lower)
-    // anchor chroma. Wide reach + 2 blur iters keep it clean.
-    'hard':      { lTol: 0.30, abTol: 0.10, softness: 10.0, lRange: 1.0, cRange: 0.6, reach: 0.40, smoothness: 2 },
+    // Hard: short gradients between palette hues. Max IDW exponent
+    // (softness=12) + tight σ_ab give very narrow transition zones at
+    // anchor boundaries — each palette region reads as a flat-ish band of
+    // its hue, with abrupt switches between them. cRange=0.6 keeps chroma
+    // closer to input so the bands stay saturated. lRange=1.0 preserves
+    // image lightness. Minimal smoothness (1 iter) so blur doesn't widen
+    // the transitions.
+    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.6, reach: 0.40, smoothness: 1 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
