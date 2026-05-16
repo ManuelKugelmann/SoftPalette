@@ -273,19 +273,19 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <h2>extend palette</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="extendPalette">
-      <span>auto-extend <span style="color:var(--txdd)">spread each anchor in L and C</span></span>
+      <span>auto-extend <span style="color:var(--txdd)">gap-fill each axis (0 = off)</span></span>
     </label>
-    <div class="slider" id="extendGridWrap" style="margin-top:8px">
-      <div class="lbl"><span>grid <span style="color:var(--txdd)">entries per anchor</span></span><span class="v" id="vExtendGrid">3×3 = 9</span></div>
-      <input type="range" id="extendGrid" min="0" max="3" step="1" value="1">
+    <div class="slider" id="extendLWrap" style="margin-top:8px">
+      <div class="lbl"><span>L gap fill <span style="color:var(--txdd)">midpoint between L-neighbors</span></span><span class="v" id="vExtendL">0.10</span></div>
+      <input type="range" id="extendL" min="0" max="0.3" step="0.01" value="0.10">
     </div>
-    <div class="slider" id="extendLSpreadWrap" style="margin-top:6px">
-      <div class="lbl"><span>L spread <span style="color:var(--txdd)">±L offset</span></span><span class="v" id="vExtendLSpread">0.10</span></div>
-      <input type="range" id="extendLSpread" min="0" max="0.5" step="0.01" value="0.10">
+    <div class="slider" id="extendCWrap" style="margin-top:6px">
+      <div class="lbl"><span>chroma gap fill <span style="color:var(--txdd)">walk C until neighbor</span></span><span class="v" id="vExtendC">0.05</span></div>
+      <input type="range" id="extendC" min="0" max="0.2" step="0.005" value="0.05">
     </div>
-    <div class="slider" id="extendCSpreadWrap" style="margin-top:6px">
-      <div class="lbl"><span>chroma spread <span style="color:var(--txdd)">±C offset</span></span><span class="v" id="vExtendCSpread">0.050</span></div>
-      <input type="range" id="extendCSpread" min="0" max="0.3" step="0.005" value="0.05">
+    <div class="slider" id="extendHWrap" style="margin-top:6px">
+      <div class="lbl"><span>hue gap fill <span style="color:var(--txdd)">midpoints on hue ring (rad)</span></span><span class="v" id="vExtendH">0.50</span></div>
+      <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="0.50">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
   </section>
@@ -482,13 +482,14 @@ const state = {
                          // urates — palette has no good answer for that cell.
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
-    // Auto-extend: synthesize a grid of (L, C) variants around each anchor.
-    // Each real anchor stamps an N×N constellation at its hue: L offset ±lSpread,
-    // chroma offset ±cSpread. Grid=1 disables (no synth). Result capped at MAX_PAL.
+    // Auto-extend: three independent per-axis gap fillers. Each threshold is
+    // the minimum gap in that axis that triggers an insert. Slider == 0 disables
+    // the axis. Number of inserts per gap = floor(gap / threshold), so smaller
+    // threshold → denser fill. Total seeds capped at MAX_PAL.
     extendPalette: false,
-    extendLSpread: 0.10, // half-range in L (0..0.5)
-    extendCSpread: 0.05, // half-range in C (0..0.3)
-    extendGrid:    3,    // 1, 3, 5, 7 (N steps per axis → N² entries per anchor)
+    extendL:       0.10, // L axis gap threshold (0..0.3); insert midpoint anchors
+    extendC:       0.05, // chroma axis gap threshold (0..0.2); per-anchor walk
+    extendH:       0.50, // hue ring gap threshold (radians, 0..π/2); insert at midpoints
   },
   gl: null, vao: null, programs: {},
   // ext_color_buffer_float availability — set in initGL
@@ -571,10 +572,15 @@ function rgbToOklab(r,g,b){
 */
 
 // Build palette seed list as OkLab tuples. Each seed carries a `synthetic`
-// flag: false for real palette entries, true for grid-extended variants.
-// Optionally extends each anchor into an N×N (L, C) grid — extra seeds at
-// offset L and offset chroma along the anchor's own hue direction. Grey
-// anchors (C≈0) get only the L spread. Output is capped at MAX_PAL.
+// flag: false for real palette entries, true for axis-extension variants.
+//
+// Auto-extend has three independent axis fillers (L / C / H). Each threshold
+// is the minimum gap on that axis that triggers an insert. Slider = 0 disables
+// the axis. Number of inserts per gap = floor(gap / threshold) so smaller
+// threshold → denser fill. Total seeds capped at MAX_PAL.
+//   L: project anchors onto L, insert midpoint anchors in big L gaps
+//   C: per anchor, walk outward in chroma; insert until hitting a neighbor
+//   H: project chromatic anchors onto hue ring, insert at hue midpoints
 function paletteSeeds(){
   const real = [];
   for (const p of state.palette){
@@ -583,30 +589,92 @@ function paletteSeeds(){
     real.push({L: lab[0], a: lab[1], b: lab[2], strength: p.strength, synthetic: false});
   }
   const par = state.params;
-  const grid = par.extendPalette ? Math.max(1, Math.round(par.extendGrid)) : 1;
-  if (grid <= 1) return real.slice(0, MAX_PAL);
+  if (!par.extendPalette) return real.slice(0, MAX_PAL);
 
-  const half  = (grid - 1) / 2;
-  const lStep = par.extendLSpread / half;
-  const cStep = par.extendCSpread / half;
-  const out = [];
-  for (const s of real){
-    if (out.length >= MAX_PAL) break;
-    const C0 = Math.hypot(s.a, s.b);
-    const hx = C0 > 1e-6 ? s.a / C0 : 0;
-    const hy = C0 > 1e-6 ? s.b / C0 : 0;
-    for (let li = -half; li <= half; li++){
+  const out = real.slice();
+  // Has any existing seed (real or already-added synth) within `tol` of cand?
+  const collides = (cand, tol) => out.some(s =>
+    Math.abs(s.L - cand.L) < tol && Math.hypot(s.a - cand.a, s.b - cand.b) < tol);
+
+  // --- L gap fill: midpoint anchors between L-adjacent real seeds ---
+  if (par.extendL > 0 && real.length >= 2){
+    const sorted = real.slice().sort((x, y) => x.L - y.L);
+    for (let i = 0; i < sorted.length - 1; i++){
       if (out.length >= MAX_PAL) break;
-      for (let ci = -half; ci <= half; ci++){
-        if (out.length >= MAX_PAL) break;
-        const isCenter = (li === 0 && ci === 0);
-        const L    = Math.max(0, Math.min(1, s.L + li * lStep));
-        const Cnew = Math.max(0, C0 + ci * cStep);
-        out.push({L, a: hx * Cnew, b: hy * Cnew, strength: s.strength, synthetic: !isCenter});
+      const a = sorted[i], b = sorted[i + 1];
+      const gap = b.L - a.L;
+      if (gap <= par.extendL) continue;
+      const nNew = Math.floor(gap / par.extendL);
+      for (let k = 1; k <= nNew && out.length < MAX_PAL; k++){
+        const t = k / (nNew + 1);
+        out.push({
+          L: a.L + t * (b.L - a.L),
+          a: a.a + t * (b.a - a.a),
+          b: a.b + t * (b.b - a.b),
+          strength: 1.0, synthetic: true,
+        });
       }
     }
   }
-  return out;
+
+  // --- C gap fill: per anchor, walk chroma in both directions until a near
+  // neighbor (collision) or the (a,b) bounds. Greys are skipped (no hue dir).
+  if (par.extendC > 0){
+    for (const s of real){
+      if (out.length >= MAX_PAL) break;
+      const C0 = Math.hypot(s.a, s.b);
+      if (C0 < 1e-3) continue;
+      const hx = s.a / C0, hy = s.b / C0;
+      for (const dir of [+1, -1]){
+        for (let step = 1; step <= 10 && out.length < MAX_PAL; step++){
+          const newC = C0 + dir * step * par.extendC;
+          if (newC < 0 || newC > LUT_AB_RANGE) break;
+          const cand = { L: s.L, a: hx * newC, b: hy * newC, strength: 1.0, synthetic: true };
+          if (collides(cand, par.extendC * 0.5)) break;
+          out.push(cand);
+        }
+      }
+    }
+  }
+
+  // --- H gap fill: hue ring midpoints between chromatic seed neighbors ---
+  if (par.extendH > 0){
+    const HUE_C_MIN = 0.02;
+    const chromatic = real.filter(s => Math.hypot(s.a, s.b) >= HUE_C_MIN);
+    if (chromatic.length >= 2){
+      const TWO_PI = 2 * Math.PI;
+      const ring = chromatic
+        .map(s => {
+          const C = Math.hypot(s.a, s.b);
+          const h = Math.atan2(s.b, s.a);
+          return { L: s.L, C, hRing: (h + TWO_PI) % TWO_PI };
+        })
+        .sort((x, y) => x.hRing - y.hRing);
+      for (let i = 0; i < ring.length; i++){
+        if (out.length >= MAX_PAL) break;
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        let gap = b.hRing - a.hRing;
+        if (gap <= 0) gap += TWO_PI;  // wraparound segment
+        if (gap <= par.extendH) continue;
+        const nNew = Math.floor(gap / par.extendH);
+        for (let k = 1; k <= nNew && out.length < MAX_PAL; k++){
+          const t = k / (nNew + 1);
+          const hNew = (a.hRing + gap * t) % TWO_PI;
+          const Lnew = a.L + t * (b.L - a.L);
+          const Cnew = a.C + t * (b.C - a.C);
+          const hSigned = hNew > Math.PI ? hNew - TWO_PI : hNew;
+          out.push({
+            L: Lnew,
+            a: Math.cos(hSigned) * Cnew,
+            b: Math.sin(hSigned) * Cnew,
+            strength: 1.0, synthetic: true,
+          });
+        }
+      }
+    }
+  }
+
+  return out.slice(0, MAX_PAL);
 }
 
 // Pack seeds into the row-1 Float32 buffer (rgb=Lab, a=strength).
@@ -862,6 +930,7 @@ function recomputeLut(){
 
   state.lutBuildMs = performance.now() - t0;
   updateLutStatus();
+  updateExtendStatus();
   renderHuePreview();
   renderSwatches();  // reflect updated synth seeds in the chip grid
 }
@@ -2040,16 +2109,17 @@ function paletteChanged(){
   requestRender();
 }
 
-// "P × G² = N (capped to MAX_PAL)" — reflects current palette size × grid.
+// Live count after running the current extend rules through the palette.
+// Reads back from the cached synthSeeds; shows "real + synth = total" with cap.
 function updateExtendStatus(){
   const el = document.getElementById('extendStatus');
   if (!el) return;
   const par = state.params;
   const palN = state.palette.length;
   if (!par.extendPalette || palN === 0){ el.textContent = ''; return; }
-  const grid   = Math.max(1, Math.round(par.extendGrid));
-  const wanted = palN * grid * grid;
-  el.textContent = `${palN} × ${grid*grid} = ${wanted}${wanted > MAX_PAL ? ` (capped to ${MAX_PAL})` : ''}`;
+  const synthN = (state.synthSeeds || []).length;
+  const total  = palN + synthN;
+  el.textContent = `${palN} real + ${synthN} synth = ${total}${total >= MAX_PAL ? ' (capped)' : ''}`;
 }
 
 // Swatch grid: chips bucketed by hue (16 chromatic bins + neutrals row),
@@ -2059,6 +2129,9 @@ function updateExtendStatus(){
 // are read-only. Hex appears on hover via `title`.
 const HUE_BINS = 24;          // 15° per bin — separates similar-but-distinct hues
 const HUE_NEUTRAL_C = 0.02;   // chroma below this → "neutrals" bucket
+// Chroma sub-bucketing per hue row: chips of the same hue but different
+// saturation get separate palette rows. Thresholds are in OkLab chroma units.
+const CHROMA_BIN_THRESHOLDS = [0.10, 0.20];  // → 3 bins: low / mid / high
 
 function _seedToHex(L, a, b){
   const lin = oklabToLinearJS(L, a, b);
@@ -2083,24 +2156,54 @@ function renderSwatches(){
     entries.push({hex: _seedToHex(s.L, s.a, s.b), L: s.L, a: s.a, b: s.b, idx: -1, synth: true});
   }
 
-  // Bucket by hue: HUE_BINS chromatic bins (sliced from -π..+π) + 1 neutrals.
-  // Neutrals are pushed to the bottom row for visual separation.
-  const buckets = Array.from({length: HUE_BINS + 1}, () => []);
+  // Bucket by (hue, chroma): HUE_BINS hue bins × (CHROMA_BIN_THRESHOLDS+1)
+  // chroma sub-bins, plus 1 neutrals row at the bottom. Chips of the same hue
+  // but different saturation get separate rows. Within a row, sort by L.
+  const NCB = CHROMA_BIN_THRESHOLDS.length + 1;  // chroma sub-bins per hue
+  function chromaBin(C){
+    for (let i = 0; i < CHROMA_BIN_THRESHOLDS.length; i++){
+      if (C < CHROMA_BIN_THRESHOLDS[i]) return i;
+    }
+    return CHROMA_BIN_THRESHOLDS.length;
+  }
+  const NCH = HUE_BINS * NCB;
+  const buckets = Array.from({length: NCH + 1}, () => []);  // +1 = neutrals
   for (const e of entries){
     const C = Math.hypot(e.a, e.b);
-    if (C < HUE_NEUTRAL_C){ buckets[HUE_BINS].push(e); continue; }
-    const h = (Math.atan2(e.b, e.a) + Math.PI) / (2 * Math.PI); // [0, 1)
-    const bin = Math.min(HUE_BINS - 1, Math.floor(h * HUE_BINS));
-    buckets[bin].push(e);
+    if (C < HUE_NEUTRAL_C){ buckets[NCH].push(e); continue; }
+    const h = (Math.atan2(e.b, e.a) + Math.PI) / (2 * Math.PI);
+    const hb = Math.min(HUE_BINS - 1, Math.floor(h * HUE_BINS));
+    const cb = chromaBin(C);
+    // Order: low-C rows first within each hue, so saturation rises downward.
+    buckets[hb * NCB + cb].push(e);
   }
   for (const bk of buckets) bk.sort((x, y) => x.L - y.L);
 
-  // Render one .palrow per non-empty bucket.
-  for (const bk of buckets){
-    if (bk.length === 0) continue;
+  // Render: outer loop hue, inner loop chroma, then neutrals.
+  for (let hb = 0; hb < HUE_BINS; hb++){
+    for (let cb = 0; cb < NCB; cb++){
+      const bk = buckets[hb * NCB + cb];
+      if (bk.length === 0) continue;
+      const row = document.createElement('div');
+      row.className = 'palrow';
+      for (const e of bk){
+        const el = document.createElement('div');
+        el.className = e.synth ? 'swatch synth' : 'swatch';
+        el.style.background = e.hex;
+        el.title = e.hex.toUpperCase() + (e.synth ? ' (synth)' : '');
+        if (!e.synth){
+          el.innerHTML = `<input type="color" value="${e.hex}" data-i="${e.idx}">`;
+        }
+        row.appendChild(el);
+      }
+      root.appendChild(row);
+    }
+  }
+  const neutrals = buckets[NCH];
+  if (neutrals.length){
     const row = document.createElement('div');
     row.className = 'palrow';
-    for (const e of bk){
+    for (const e of neutrals){
       const el = document.createElement('div');
       el.className = e.synth ? 'swatch synth' : 'swatch';
       el.style.background = e.hex;
@@ -2406,65 +2509,45 @@ function init(){
     btn.addEventListener('click', () => applyLutPreset(btn.dataset.lutpreset));
   });
 
-  // Extend-palette controls.
-  // Grid slider exposes 1/3/5/7 — discrete values, displayed as N×N.
-  const EXTEND_GRID_VALUES = [1, 3, 5, 7];
-  const extendGridInp = document.getElementById('extendGrid');
-  const vExtendGrid   = document.getElementById('vExtendGrid');
-  const extendLInp    = document.getElementById('extendLSpread');
-  const vExtendL      = document.getElementById('vExtendLSpread');
-  const extendCInp    = document.getElementById('extendCSpread');
-  const vExtendC      = document.getElementById('vExtendCSpread');
-  const extendCb      = document.getElementById('extendPalette');
-  const extendGridWrap     = document.getElementById('extendGridWrap');
-  const extendLSpreadWrap  = document.getElementById('extendLSpreadWrap');
-  const extendCSpreadWrap  = document.getElementById('extendCSpreadWrap');
-  function gridLabel(g){ return g <= 1 ? '1 (off)' : `${g}×${g} = ${g*g}`; }
+  // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
+  // Slider == 0 disables that axis. Number of inserts per gap is automatic
+  // (floor(gap / threshold)), so smaller threshold → denser fill.
+  const extendCb        = document.getElementById('extendPalette');
+  const extendLWrap     = document.getElementById('extendLWrap');
+  const extendCWrap     = document.getElementById('extendCWrap');
+  const extendHWrap     = document.getElementById('extendHWrap');
   function refreshExtendUI(){
     const on = state.params.extendPalette;
     const op = on ? '1' : '0.4';
     const pe = on ? 'auto' : 'none';
-    for (const el of [extendGridWrap, extendLSpreadWrap, extendCSpreadWrap]){
+    for (const el of [extendLWrap, extendCWrap, extendHWrap]){
       el.style.opacity = op;
       el.style.pointerEvents = pe;
     }
     updateExtendStatus();
   }
-  function setExtendGridFromIdx(idx){
-    const g = EXTEND_GRID_VALUES[Math.max(0, Math.min(EXTEND_GRID_VALUES.length - 1, idx))];
-    state.params.extendGrid = g;
-    vExtendGrid.textContent = gridLabel(g);
-  }
-  // Initialize widgets from state.params
   extendCb.checked = state.params.extendPalette;
-  extendGridInp.value = EXTEND_GRID_VALUES.indexOf(state.params.extendGrid);
-  setExtendGridFromIdx(parseInt(extendGridInp.value, 10));
-  extendLInp.value = state.params.extendLSpread;
-  vExtendL.textContent = state.params.extendLSpread.toFixed(2);
-  extendCInp.value = state.params.extendCSpread;
-  vExtendC.textContent = state.params.extendCSpread.toFixed(3);
   refreshExtendUI();
-
   extendCb.addEventListener('change', () => {
     state.params.extendPalette = extendCb.checked;
     refreshExtendUI();
     scheduleLutRebuild();
   });
-  extendGridInp.addEventListener('input', () => {
-    setExtendGridFromIdx(parseInt(extendGridInp.value, 10));
-    refreshExtendUI();
-    scheduleLutRebuild();
-  });
-  extendLInp.addEventListener('input', () => {
-    state.params.extendLSpread = parseFloat(extendLInp.value);
-    vExtendL.textContent = state.params.extendLSpread.toFixed(2);
-    scheduleLutRebuild();
-  });
-  extendCInp.addEventListener('input', () => {
-    state.params.extendCSpread = parseFloat(extendCInp.value);
-    vExtendC.textContent = state.params.extendCSpread.toFixed(3);
-    scheduleLutRebuild();
-  });
+  function bindExtendAxis(inputId, labelId, key, fmt){
+    const inp = document.getElementById(inputId);
+    const lbl = document.getElementById(labelId);
+    inp.value = state.params[key];
+    lbl.textContent = fmt(state.params[key]);
+    inp.addEventListener('input', () => {
+      state.params[key] = parseFloat(inp.value);
+      lbl.textContent = fmt(state.params[key]);
+      updateExtendStatus();
+      scheduleLutRebuild();
+    });
+  }
+  bindExtendAxis('extendL', 'vExtendL', 'extendL', v => v.toFixed(2));
+  bindExtendAxis('extendC', 'vExtendC', 'extendC', v => v.toFixed(3));
+  bindExtendAxis('extendH', 'vExtendH', 'extendH', v => v.toFixed(2));
 
   // Split: drag anywhere on the canvas to move the split line.
   // - `touch-action:none` on canvasWrap (CSS) prevents native pan/zoom from
