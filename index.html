@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T22:00:53Z">
+<meta name="build" content="2026-05-16T22:02:33Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:00:53Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:02:33Z</span>
   </div>
 </header>
 
@@ -312,11 +312,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>lut parameters</h2>
     <div class="row full" style="margin-bottom:8px">
-      <button data-lutpreset="1" title="softest — palette adds a faint wash">1</button>
-      <button data-lutpreset="2" title="soft — gentle blend, structure clear">2</button>
-      <button data-lutpreset="3" title="balanced — middle of the sweep">3</button>
-      <button data-lutpreset="4" title="snappy — tight cells, palette-driven">4</button>
-      <button data-lutpreset="5" title="hardest — near-Voronoi, palette colors only">5</button>
+      <button data-lutpreset="wash"      title="Extreme soft — palette adds a faint wash of color">wash</button>
+      <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
+      <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
+      <button data-lutpreset="vivid"     title="Sharp hue separation, wide L acceptance">vivid</button>
+      <button data-lutpreset="hard"      title="Near-Voronoi snap — palette colors only, soft seams">hard</button>
     </div>
     <div class="slider">
       <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
@@ -501,7 +501,7 @@ const state = {
     // palette's L-conditional mean hue before IDW. 0 = off, 1 = full shift to
     // L-mean. Captures the teal-orange-style "cool shadows, warm highlights"
     // automatically from the palette's L→(a,b) profile.
-    lumaLook: 0.20,
+    lumaLook: 0.0,
     // Diagnostic: which L slice the LUT-slice preview shows. 0 dark, 1 bright.
     lutSliceL: 0.5,
     // Per-axis blend back toward the input cell's own L/C — 0 snaps fully to
@@ -518,8 +518,8 @@ const state = {
     // final output chroma similarly clamped around the nearest anchor's C.
     // Range max = full axis range (1.0 for L, LUT_AB_RANGE for C) → noop.
     // Range 0 → hard snap to the nearest anchor's L / C respectively.
-    lExt:   0.50,        // L envelope half-range (0 = hard snap to anchor L)
-    cExt:   0.20,        // C envelope half-range (0 = hard snap to anchor C)
+    lExt:   1.0,         // L envelope half-range (0 = hard snap to anchor L)
+    cExt:   0.40,        // C envelope half-range (0 = hard snap to anchor C)
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -3410,21 +3410,15 @@ function init(){
     });
   })();
 
-  // LUT presets: a 5-step sweep of the parameter space from softest (1) to
-  // hardest (5). Slot 3 is balanced. Every parameter that meaningfully shapes
-  // the LUT is exercised: anisotropic Voronoi tolerances (lTol, abTol),
-  // IDW softness, chroma passthrough (cRange), rejection radius (reach),
-  // per-channel envelope half-extents (lExt, cExt), blur iterations, and a
-  // baseline luma look. The previous "hard" preset clamped cExt to 0.06 —
-  // below the soft-clamp's smoothing band, which caused visible step rings
-  // wherever the nearest-anchor switched. The new slot 5 keeps the envelope
-  // wide enough for softMax/softMin to smooth out the boundary.
+  // Five named operating points along the soft↔hard axis. The hue-based
+  // envelope + softMax/softMin clamp smooths what used to be hard step
+  // rings on the tight 'hard' preset, so cExt=0.06 / lExt=0.20 work again.
   const lutPresets = {
-    '1': { lTol: 0.80, abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.30, reach: 0.20, lExt: 0.80, cExt: 0.35, smoothness: 3, lumaLook: 0.15 },
-    '2': { lTol: 0.65, abTol: 0.22, softness: 2.5,  lRange: 1.0, cRange: 0.45, reach: 0.25, lExt: 0.65, cExt: 0.28, smoothness: 2, lumaLook: 0.20 },
-    '3': { lTol: 0.50, abTol: 0.18, softness: 4.0,  lRange: 1.0, cRange: 0.55, reach: 0.30, lExt: 0.50, cExt: 0.20, smoothness: 2, lumaLook: 0.20 },
-    '4': { lTol: 0.35, abTol: 0.10, softness: 6.0,  lRange: 1.0, cRange: 0.60, reach: 0.35, lExt: 0.40, cExt: 0.16, smoothness: 1, lumaLook: 0.25 },
-    '5': { lTol: 0.28, abTol: 0.07, softness: 10.0, lRange: 1.0, cRange: 0.50, reach: 0.45, lExt: 0.30, cExt: 0.13, smoothness: 1, lumaLook: 0.30 },
+    'wash':      { lTol: 0.8,  abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
+    'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.35 },
+    'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.25 },
+    'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.10 },
+    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.60, reach: 0.40, lExt: 0.20, cExt: 0.06, smoothness: 1, lumaLook: 0.50 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
