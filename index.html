@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:15:30Z">
+<meta name="build" content="2026-05-16T20:23:18Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:15:30Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:23:18Z</span>
   </div>
 </header>
 
@@ -269,16 +269,16 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
     <div class="slider" id="extendHWrap" style="margin-top:8px">
-      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad</span></span><span class="v" id="vExtendH">0.50</span></div>
-      <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="0.50">
+      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad</span></span><span class="v" id="vExtendH">1.50</span></div>
+      <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="1.50">
     </div>
     <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendC">8</span></div>
-      <input type="range" id="extendC" min="0" max="32" step="1" value="8">
+      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendC">1</span></div>
+      <input type="range" id="extendC" min="0" max="32" step="1" value="1">
     </div>
     <div class="slider" id="extendLWrap" style="margin-top:6px">
-      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendL">8</span></div>
-      <input type="range" id="extendL" min="0" max="32" step="1" value="8">
+      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendL">1</span></div>
+      <input type="range" id="extendL" min="0" max="32" step="1" value="1">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
   </section>
@@ -535,9 +535,9 @@ const state = {
     // direction (real takes precedence); hitting a SYNTHETIC anchor
     // averages the candidate into it (smooths overlapping contributions).
     extendPalette: false,
-    extendH:       0.50, // hue ring gap threshold (radians, 0..π/2)
-    extendC:       8,    // chroma walk step count per anchor (0 = off, 32 = full)
-    extendL:       8,    // L walk step count per anchor (0 = off, 32 = full)
+    extendH:       1.50, // hue ring gap threshold (radians, 0..π/2) — default high = rarely triggers
+    extendC:       1,    // chroma walk step count per anchor (0 = off, 32 = full)
+    extendL:       1,    // L walk step count per anchor (0 = off, 32 = full)
   },
   gl: null, vao: null, programs: {},
   // ext_color_buffer_float availability — set in initGL
