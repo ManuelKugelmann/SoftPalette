@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T19:20:54Z">
+<meta name="build" content="2026-05-16T19:32:10Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:20:54Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:32:10Z</span>
   </div>
 </header>
 
@@ -266,18 +266,18 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <h2>extend palette</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="extendPalette">
-      <span>auto-extend <span style="color:var(--txdd)">gap-fill each axis (0 = off)</span></span>
+      <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
     <div class="slider" id="extendLWrap" style="margin-top:8px">
-      <div class="lbl"><span>L gap fill <span style="color:var(--txdd)">midpoint between L-neighbors</span></span><span class="v" id="vExtendL">0.10</span></div>
+      <div class="lbl"><span>L gap <span style="color:var(--txdd)">min Δ</span></span><span class="v" id="vExtendL">0.10</span></div>
       <input type="range" id="extendL" min="0" max="0.3" step="0.01" value="0.10">
     </div>
     <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>chroma gap fill <span style="color:var(--txdd)">walk C until neighbor</span></span><span class="v" id="vExtendC">0.05</span></div>
+      <div class="lbl"><span>C gap <span style="color:var(--txdd)">min ΔC</span></span><span class="v" id="vExtendC">0.05</span></div>
       <input type="range" id="extendC" min="0" max="0.2" step="0.005" value="0.05">
     </div>
     <div class="slider" id="extendHWrap" style="margin-top:6px">
-      <div class="lbl"><span>hue gap fill <span style="color:var(--txdd)">midpoints on hue ring (rad)</span></span><span class="v" id="vExtendH">0.50</span></div>
+      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad</span></span><span class="v" id="vExtendH">0.50</span></div>
       <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="0.50">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
@@ -321,19 +321,19 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutpreset="hard"      title="Near-Voronoi snap — palette colors only, soft seams">hard</button>
     </div>
     <div class="slider">
-      <div class="lbl"><span>lut size <span style="color:var(--txdd)">cube edge</span></span><span class="v" id="vLutSize">33³</span></div>
+      <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
       <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>L tolerance <span style="color:var(--txdd)">σ_L</span></span><span class="v" id="vLTol">0.50</span></div>
+      <div class="lbl"><span>L tol <span style="color:var(--txdd)">σ_L</span></span><span class="v" id="vLTol">0.50</span></div>
       <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma tolerance <span style="color:var(--txdd)">σ_ab</span></span><span class="v" id="vAbTol">0.20</span></div>
+      <div class="lbl"><span>C tol <span style="color:var(--txdd)">σ_ab</span></span><span class="v" id="vAbTol">0.20</span></div>
       <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>softness <span style="color:var(--txdd)">low=hard nearest, high=mush</span></span><span class="v" id="vSoftness">9.0</span></div>
+      <div class="lbl"><span>softness <span style="color:var(--txdd)">↑=soft</span></span><span class="v" id="vSoftness">9.0</span></div>
       <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
     </div>
     <div class="slider" style="margin-top:6px">
@@ -364,15 +364,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   </section>
 
   <section class="card">
+    <h2>hues preview</h2>
+    <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
+  </section>
+
+  <section class="card">
     <h2>export</h2>
     <div class="row full">
       <button id="exportPng">⬇ png</button>
     </div>
-  </section>
-
-  <section class="card">
-    <h2>hues preview</h2>
-    <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
   </section>
 </aside>
 
@@ -790,9 +790,12 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     if (d2_iso < dmin2_iso) dmin2_iso = d2_iso;
   }
   let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
-  // Gate direction blends cell → curve as lumaLook → 1. Same as shader.
-  const gateAx = a + lumaLook * (expA - a);
-  const gateBx = b + lumaLook * (expB - b);
+  // midWeight scales luma-look effect — strong at L extremes, weak at midtone
+  // so e.g. skin tones at L≈0.5 stay near their input hue.
+  const midWeight = 0.2 + 0.8 * Math.abs(L - 0.5) * 2;
+  const lookStrength = lumaLook * midWeight;
+  const gateAx = a + lookStrength * (expA - a);
+  const gateBx = b + lookStrength * (expB - b);
   const gateC2 = gateAx*gateAx + gateBx*gateBx;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
@@ -800,17 +803,15 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     const r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     let w = Math.pow(r2, -halfP) * s.strength;
     const ancC2 = s.a*s.a + s.b*s.b;
-    // (a) Soft hue gate against blended cell/curve direction.
     if (gateC2 > 1e-6 && ancC2 > 1e-6){
       const cos_dh = (gateAx*s.a + gateBx*s.b) / Math.sqrt(gateC2 * ancC2);
-      const t0 = Math.max(0, Math.min(1, (cos_dh + 0.2) / 0.4));
+      const t0 = Math.max(0, Math.min(1, (cos_dh + 0.5) / 1.0));
       w *= t0 * t0 * (3 - 2 * t0);
     }
-    // (b) Luma-look alignment bonus.
-    if (lumaLook > 0 && expC > 1e-6 && ancC2 > 1e-6){
+    if (lookStrength > 1e-4 && expC > 1e-6 && ancC2 > 1e-6){
       const dotE = (expA*s.a + expB*s.b) / (expC * Math.sqrt(ancC2));
-      const bonus = 0.5 + 0.5 * dotE;
-      w *= 1 + lumaLook * (bonus - 1);
+      const bonus = 0.7 + 0.3 * dotE;
+      w *= 1 + lookStrength * (bonus - 1);
     }
     sumW += w;
     sL += w * s.L; sA += w * s.a; sB += w * s.b;
@@ -1239,14 +1240,16 @@ void main(){
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
 
   // Luma-look: read the palette's L-conditional expected direction (curve)
-  // at this cell's L. We do NOT pre-shift the cell — that would override the
-  // palette. Instead, the curve direction is used in IDW Pass 2 to bias
-  // anchor weights: anchors aligned with the curve at this L are boosted,
-  // anchors opposite are suppressed. The palette still drives the output;
-  // luma look just gently tilts which anchors win at each L, producing a
-  // smooth dark→light hue ramp without erasing palette character.
+  // at this cell's L. midWeight scales how strongly the curve influences
+  // anchor selection — zero at midtones (so e.g. skin tones at L≈0.5 stay
+  // near their input hue) and full strength at the L extremes (so shadows
+  // and highlights pick up the dark/light tints).
   vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
   float expC    = length(expected);
+  // Plateau midWeight: 0.2 at L=0.5 (some midtone effect, not zero, so the
+  // transition isn't abrupt), 1.0 at L=0 and L=1 (full curve influence).
+  float midWeight = 0.2 + 0.8 * abs(L - 0.5) * 2.0;
+  float lookStrength = uLumaLook * midWeight;
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
@@ -1281,7 +1284,7 @@ void main(){
   //       boosted weight; anchors pointing away get suppressed. Palette
   //       still drives the output; luma look just biases which anchors
   //       carry weight at each L. Influence, not override.
-  vec2 gateDir = mix(vec2(a, b), expected, uLumaLook);
+  vec2 gateDir = mix(vec2(a, b), expected, lookStrength);
   float gateC2 = gateDir.x*gateDir.x + gateDir.y*gateDir.y;
   float sumW   = 1e-12;
   vec3  sumLab = vec3(0.0);
@@ -1296,16 +1299,21 @@ void main(){
     float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     float w  = pow(r2, -halfP) * s.w;
     float ancC2 = s.y*s.y + s.z*s.z;
-    // (a) Soft hue gate against blended cell/curve direction.
+    // (a) Soft hue gate against blended cell/curve direction. Smoothstep
+    // range widened to (-0.5, 0.5) so anchors at hue differences near 90°
+    // fade gradually rather than snapping in/out.
     if (gateC2 > 1e-6 && ancC2 > 1e-6){
       float cos_dh = (gateDir.x*s.y + gateDir.y*s.z) / sqrt(gateC2 * ancC2);
-      w *= smoothstep(-0.2, 0.2, cos_dh);
+      w *= smoothstep(-0.5, 0.5, cos_dh);
     }
-    // (b) Luma-look alignment bonus toward the curve direction.
-    if (uLumaLook > 0.0 && expC > 1e-6 && ancC2 > 1e-6){
+    // (b) Luma-look alignment bonus toward the curve direction. Bonus has a
+    // FLOOR so opposite-aligned anchors still contribute ~40% at max
+    // lumaLook — that's the "more blend, less hard switch" the user wants.
+    //   bonus = 0.7 + 0.3 * dotE → range [0.4, 1.0]
+    if (lookStrength > 1e-4 && expC > 1e-6 && ancC2 > 1e-6){
       float dotE = (expected.x*s.y + expected.y*s.z) / (expC * sqrt(ancC2));
-      float bonus = 0.5 + 0.5 * dotE;
-      w *= mix(1.0, bonus, uLumaLook);
+      float bonus = 0.7 + 0.3 * dotE;
+      w *= mix(1.0, bonus, lookStrength);
     }
     sumW   += w;
     sumLab += w * s.xyz;
