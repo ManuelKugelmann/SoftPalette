@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:23:18Z">
+<meta name="build" content="2026-05-16T20:29:26Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:23:18Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:29:26Z</span>
   </div>
 </header>
 
@@ -269,16 +269,16 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
     <div class="slider" id="extendHWrap" style="margin-top:8px">
-      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad</span></span><span class="v" id="vExtendH">1.50</span></div>
-      <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="1.50">
+      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad, 6.28 = off</span></span><span class="v" id="vExtendH">6.28</span></div>
+      <input type="range" id="extendH" min="0" max="6.28" step="0.05" value="6.28">
     </div>
     <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendC">1</span></div>
-      <input type="range" id="extendC" min="0" max="32" step="1" value="1">
+      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendC">1</span></div>
+      <input type="range" id="extendC" min="0" max="8" step="1" value="1">
     </div>
     <div class="slider" id="extendLWrap" style="margin-top:6px">
-      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendL">1</span></div>
-      <input type="range" id="extendL" min="0" max="32" step="1" value="1">
+      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendL">1</span></div>
+      <input type="range" id="extendL" min="0" max="8" step="1" value="1">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
   </section>
@@ -345,7 +345,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma look <span style="color:var(--txdd)">L→hue bias from palette (teal-orange style)</span></span><span class="v" id="vLumaLook">0.00</span></div>
+      <div class="lbl"><span>luma look <span style="color:var(--txdd)">L→hue bias</span></span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
     <div class="slider" style="margin-top:6px">
@@ -375,11 +375,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <h2>previews</h2>
     <div class="note" style="margin-bottom:3px">hues · full pipeline</div>
     <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
-    <div class="note" style="margin:6px 0 3px">hues · raw IDW <span style="color:var(--txdd)">(no luma look · reach · cRange)</span></div>
-    <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
     <div class="note" style="margin:6px 0 3px">LUT slice <span style="color:var(--txdd)">(a→, b↑) at L=<span id="vLutSliceL">0.50</span></span></div>
     <input type="range" id="lutSliceL" min="0" max="1" step="0.02" value="0.5" style="width:100%;margin-bottom:4px">
     <canvas id="lutSlicePreview" width="160" height="160" style="width:100%;max-width:160px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
+    <div class="note" style="margin:6px 0 3px">hues · raw IDW <span style="color:var(--txdd)">(no luma look · reach · cRange)</span></div>
+    <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
   </section>
 
   <section class="card">
@@ -535,9 +535,9 @@ const state = {
     // direction (real takes precedence); hitting a SYNTHETIC anchor
     // averages the candidate into it (smooths overlapping contributions).
     extendPalette: false,
-    extendH:       1.50, // hue ring gap threshold (radians, 0..π/2) — default high = rarely triggers
-    extendC:       1,    // chroma walk step count per anchor (0 = off, 32 = full)
-    extendL:       1,    // L walk step count per anchor (0 = off, 32 = full)
+    extendH:       6.28, // hue ring gap threshold (radians, 0..2π) — default = full hue range = noop
+    extendC:       1,    // chroma walk step count per anchor (0 = off, 8 = full axis from anchor)
+    extendL:       1,    // L walk step count per anchor (0 = off, 8 = full axis from anchor)
   },
   gl: null, vao: null, programs: {},
   // ext_color_buffer_float availability — set in initGL
@@ -761,10 +761,17 @@ function paletteSeeds(){
     }
   }
 
+  // Fixed step size (independent of slider value): the slider says HOW MANY
+  // steps to walk, the step size is set to cover the full axis in MAX_STEPS.
+  // So slider=1 walks one ordinary-size step (visible synth, not a zero
+  // movement that would merge back into the source anchor); slider=8 covers
+  // the full axis range from the anchor.
+  const MAX_STEPS = 8;
+
   // ----- 2. Chroma steps: walk each anchor's chroma in both directions -----
   if (par.extendC > 0){
     const N = Math.max(1, Math.round(par.extendC));
-    const stepC = LUT_AB_RANGE / N;
+    const stepC = LUT_AB_RANGE / MAX_STEPS;
     const tolC  = stepC * 0.5;
     walkAxis(N, (s, dir, i) => {
       const C0 = Math.hypot(s.a, s.b);
@@ -779,7 +786,7 @@ function paletteSeeds(){
   // ----- 3. Lightness steps: walk each anchor's L in both directions -----
   if (par.extendL > 0){
     const N = Math.max(1, Math.round(par.extendL));
-    const stepL = 1.0 / N;
+    const stepL = 1.0 / MAX_STEPS;
     const tolL  = stepL * 0.5;
     walkAxis(N, (s, dir, i) => {
       const newL = s.L + dir * i * stepL;
