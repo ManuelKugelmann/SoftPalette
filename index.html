@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:42:37Z">
+<meta name="build" content="2026-05-16T20:51:40Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:42:37Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:51:40Z</span>
   </div>
 </header>
 
@@ -580,54 +580,72 @@ function rgbToHex(r,g,b){
   return '#'+f(r)+f(g)+f(b);
 }
 
-// HPLuv → sRGB byte triple. h in [0,360), s & l in [0,100]. HPLuv keeps the
-// chroma at each L identical across all hues (the smallest in-gamut chroma
-// for the L slice), so a hue × L sweep at s=100 yields a clean cylinder with
-// no per-hue brightness or chroma banding. Reference: https://www.hsluv.org.
-function hpluvToRgb(h, s, l){
-  if (l > 99.9999999) return [255, 255, 255];
-  if (l < 1e-8)       return [0, 0, 0];
-  // XYZ_D65 → linear sRGB matrix (rows).
+// HSLuv / HPLuv → sRGB byte triple. h in [0,360), s & l in [0,100]. HSLuv
+// uses the per-hue max chroma (richer saturation; chroma varies smoothly
+// with hue at each L). HPLuv uses the smallest in-gamut chroma across all
+// hues (uniform chroma per row, more muted). Both keep L truly perceptual,
+// so a hue × L sweep has uniform brightness per row. Reference:
+// https://www.hsluv.org/.
+function _hsluvBounds(l){
   const m00 =  3.240969941904521, m01 = -1.537383177570093, m02 = -0.498610760293;
   const m10 = -0.96924363628087,  m11 =  1.87596750150772,  m12 =  0.041555057407;
   const m20 =  0.055630079696993, m21 = -0.20397695888897,  m22 =  1.056971514242878;
   const kappa = 903.2962962962963;
   const sub1 = Math.pow(l + 16, 3) / 1560896;
   const sub2 = sub1 > 0.008856451679035631 ? sub1 : l / kappa;
-  // Max safe chroma = closest sRGB-gamut bounding line at this L (over 3
-  // channels × 2 limits {0,1}), computed analytically in (u*, v*) space.
-  let minD = Infinity;
   const M = [[m00,m01,m02],[m10,m11,m12],[m20,m21,m22]];
+  const out = [];
   for (let c = 0; c < 3; c++){
     const r1 = M[c][0], r2 = M[c][1], r3 = M[c][2];
     for (let t = 0; t < 2; t++){
       const top1 = (284517 * r1 - 94839 * r3) * sub2;
       const top2 = (838422 * r3 + 769860 * r2 + 731718 * r1) * l * sub2 - 769860 * t * l;
       const bottom = (632260 * r3 - 126452 * r2) * sub2 + 126452 * t;
-      const slope = top1 / bottom;
-      const intercept = top2 / bottom;
-      const d = Math.abs(intercept) / Math.sqrt(slope * slope + 1);
-      if (d < minD) minD = d;
+      out.push([top1 / bottom, top2 / bottom]);  // slope, intercept
     }
   }
-  const C = minD * s / 100;
-  const hr = h * Math.PI / 180;
-  const u = C * Math.cos(hr), v = C * Math.sin(hr);
-  // LUV → XYZ (D65, Y in [0,1])
+  return out;
+}
+function _luvLchToRgb(l, c, hr){
+  if (l > 99.9999999) return [255, 255, 255];
+  if (l < 1e-8)       return [0, 0, 0];
+  const kappa = 903.2962962962963;
+  const u = c * Math.cos(hr), v = c * Math.sin(hr);
   const refU = 0.19783000664283, refV = 0.46831999493879;
   const varU = u / (13 * l) + refU;
   const varV = v / (13 * l) + refV;
   const Y = l > 8 ? Math.pow((l + 16) / 116, 3) : l / kappa;
   const X = Y * 9 * varU / (4 * varV);
   const Z = Y * (12 - 3 * varU - 20 * varV) / (4 * varV);
-  // XYZ → linear sRGB → gamma → byte clamp
-  const Rl = m00 * X + m01 * Y + m02 * Z;
-  const Gl = m10 * X + m11 * Y + m12 * Z;
-  const Bl = m20 * X + m21 * Y + m22 * Z;
+  const Rl =  3.240969941904521 * X - 1.537383177570093 * Y - 0.498610760293     * Z;
+  const Gl = -0.96924363628087  * X + 1.87596750150772  * Y + 0.041555057407    * Z;
+  const Bl =  0.055630079696993 * X - 0.20397695888897  * Y + 1.056971514242878 * Z;
   const R = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Rl)))));
   const G = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Gl)))));
   const B = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Bl)))));
   return [Math.round(R * 255), Math.round(G * 255), Math.round(B * 255)];
+}
+function hpluvToRgb(h, s, l){
+  if (l > 99.9999999) return [255, 255, 255];
+  if (l < 1e-8)       return [0, 0, 0];
+  let minD = Infinity;
+  for (const ln of _hsluvBounds(l)){
+    const d = Math.abs(ln[1]) / Math.sqrt(ln[0] * ln[0] + 1);
+    if (d < minD) minD = d;
+  }
+  return _luvLchToRgb(l, minD * s / 100, h * Math.PI / 180);
+}
+function hsluvToRgb(h, s, l){
+  if (l > 99.9999999) return [255, 255, 255];
+  if (l < 1e-8)       return [0, 0, 0];
+  const hr = h * Math.PI / 180;
+  const sin = Math.sin(hr), cos = Math.cos(hr);
+  let minLen = Infinity;
+  for (const ln of _hsluvBounds(l)){
+    const len = ln[1] / (sin - ln[0] * cos);
+    if (len >= 0 && len < minLen) minLen = len;
+  }
+  return _luvLchToRgb(l, minLen * s / 100, hr);
 }
 
 function rgbToOklab(r,g,b){
@@ -969,14 +987,21 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
   Bo *= reject;
   Lo = Lo + lRange * (L - Lo);
   // Per-channel envelope clamp around the nearest anchor's L / C.
+  // Mirrors shader's softMax/softMin to avoid a visible step where the
+  // output crosses the floor/ceiling.
+  const kL = 0.02, kC = 0.02;
+  const softMax = (x, m, k) => 0.5 * (x + m + Math.sqrt((x - m) * (x - m) + k * k));
+  const softMin = (x, m, k) => 0.5 * (x + m - Math.sqrt((x - m) * (x - m) + k * k));
   if (lExt !== undefined){
-    Lo = Math.max(nearestL - lExt, Math.min(nearestL + lExt, Lo));
+    Lo = softMax(Lo, nearestL - lExt, kL);
+    Lo = softMin(Lo, nearestL + lExt, kL);
   }
   if (cExt !== undefined){
     const outC = Math.hypot(Ao, Bo);
     const minC = Math.max(0, nearestC - cExt);
     const maxC = nearestC + cExt;
-    const clampedC = Math.max(minC, Math.min(maxC, outC));
+    let clampedC = softMax(outC, minC, kC);
+    clampedC = softMin(clampedC, maxC, kC);
     if (outC > 1e-6){
       Ao *= clampedC / outC;
       Bo *= clampedC / outC;
@@ -1380,6 +1405,12 @@ uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
 uniform sampler2D uLumaCurve; // 16×1 RGBA32F: rg = palette mean (a, b) at L
 uniform float uLumaLook;      // 0 = no shift; 1 = full pre-shift to L-mean hue
 
+// Soft min/max: smooth analytic alternatives to min()/max() so the envelope
+// clamp doesn't create a visible step where the input crosses the bound.
+// k → 0 reproduces the hard version; k > 0 widens the transition band.
+float softMax(float x, float m, float k){ return 0.5 * (x + m + sqrt((x - m) * (x - m) + k * k)); }
+float softMin(float x, float m, float k){ return 0.5 * (x + m - sqrt((x - m) * (x - m) + k * k)); }
+
 void main(){
   float N    = uN;
   float ai   = floor(gl_FragCoord.x);
@@ -1499,11 +1530,19 @@ void main(){
   // slider (uLExt=1, uCExt=LUT_AB_RANGE) the range covers the whole axis and
   // the clamp is a noop. At 0 the output is hard-snapped to the nearest
   // anchor's L or C (chroma magnitude collapsed; hue direction kept).
-  lab.x = clamp(lab.x, nearestL - uLExt, nearestL + uLExt);
+  // Soft clamp with a small smoothing band (k) so the floor/ceiling fades in
+  // instead of stepping. k is small relative to typical extents; at k=0.02
+  // the transition spans only a few percent of the axis but kills the visible
+  // ridge that a hard clamp produced at the LUT slice's low-chroma center.
+  const float kL = 0.02;
+  const float kC = 0.02;
+  lab.x = softMax(lab.x, nearestL - uLExt, kL);
+  lab.x = softMin(lab.x, nearestL + uLExt, kL);
   float outC      = length(lab.yz);
   float minC      = max(0.0, nearestC - uCExt);
   float maxC      = nearestC + uCExt;
-  float clampedC  = clamp(outC, minC, maxC);
+  float clampedC  = softMax(outC, minC, kC);
+  clampedC        = softMin(clampedC, maxC, kC);
   if (outC > 1e-6) lab.yz *= clampedC / outC;
   fragColor = vec4(lab, 1.0);
 }`;
@@ -1595,6 +1634,26 @@ void main(){
   fragColor = vec4(col, 1.0);
 }`;
 
+// LUT slice preview: samples the actual baked 3D LUT (post-blur, post-stamps)
+// at a fixed L plane, mapping vUV.x → a and vUV.y → b. Matches whatever the
+// per-pixel shader would sample for an input pixel at this (L, a, b), so the
+// slice is a true cross-section of the final LUT.
+const FS_LUT_SLICE = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+in vec2 vUV;
+out vec4 fragColor;
+uniform sampler3D uLut3D;
+uniform float uL;
+${OKLAB_GLSL}
+void main(){
+  vec3 coord  = vec3(vUV.x, vUV.y, clamp(uL, 0.0, 1.0));
+  vec3 outLab = texture(uLut3D, coord).rgb;
+  vec3 col    = linearToSrgb(oklabToLinear(outLab));
+  col = clamp(col, vec3(0.0), vec3(1.0));
+  fragColor = vec4(col, 1.0);
+}`;
+
 /* =========================================================
    GL HELPERS
    ========================================================= */
@@ -1641,6 +1700,7 @@ function initGL(){
   state.programs.lutBuild = program(VS, FS_LUT_BUILD);
   state.programs.lutBlur  = program(VS, FS_LUT_BLUR);
   state.programs.lutStamp = program(VS, FS_LUT_STAMP);
+  state.programs.lutSlice = program(VS, FS_LUT_SLICE);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -2045,11 +2105,12 @@ function makeLandscapeImage(){
   return cv;
 }
 
-// Hue picker test image: HPLuv hue × L sweep at max safe saturation.
-// X axis = hue [0°, 360°). Y axis = L (top L=100, bottom L=0). HPLuv's
-// per-row chroma is the smallest in-gamut chroma across all hues at that L
-// → uniform brightness AND uniform chroma per row, no centerline stripe and
-// no per-hue chroma bands. L extremes naturally fade to white/black.
+// Hue picker test image: HSLuv hue × L sweep at full saturation.
+// X axis = hue [0°, 360°). Y axis = L (top L=100, bottom L=0). HSLuv keeps
+// L truly perceptual (uniform brightness per row → no centerline stripe, no
+// per-hue brightness bands from sRGB primary spikes) and scales chroma to
+// the per-hue sRGB gamut limit, so each hue is as saturated as the gamut
+// allows. L extremes naturally fade to white/black.
 function makeHuePickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2061,7 +2122,7 @@ function makeHuePickerImage(){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvToRgb(h, 100, L);
+      const [r, g, b] = hsluvToRgb(h, 100, L);
       const idx = (y * W + x) * 4;
       data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
     }
@@ -2346,13 +2407,13 @@ let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
 function buildHuePreviewSrc(){
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   const buf = new Uint8ClampedArray(W * H * 4);
-  // HPLuv hue × L sweep — same generator as the main hue picker test image
-  // (uniform chroma across hues per row, white/black at L extremes).
+  // HSLuv hue × L sweep — same generator as the main hue picker test image
+  // (per-hue max chroma at uniform L, white/black at L extremes).
   for (let y = 0; y < H; y++){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = hpluvToRgb(h, 100, L);
+      const [r, g, b] = hsluvToRgb(h, 100, L);
       const i = (y * W + x) * 4;
       buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
@@ -2582,9 +2643,28 @@ function renderIdwPreview(){
   }
 }
 
-// LUT slice preview: 2D plane at user-selected L (state.params.lutSliceL).
-// x→a, y→b. Each anchor whose L is close to the slice is marked with a
-// filled dot at its (a, b) projection; further-L anchors get smaller dots.
+// LUT slice preview: samples the actual baked 3D LUT (post anchor stamps and
+// blur iterations) at the user-selected L. x→a, y→b. Each anchor whose L is
+// close to the slice is marked with a filled dot at its (a, b) projection;
+// further-L anchors get smaller dots. This is a true cross-section of the
+// final LUT — matches whatever the per-pixel shader samples for an input at
+// this (L, a, b).
+function _ensureLutSlicePreviewGpu(){
+  const gl = state.gl;
+  if (state.lutSliceFbo) return;
+  const cv = document.getElementById('lutSlicePreview');
+  const W = cv.width, H = cv.height;
+  state.lutSliceOutTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, state.lutSliceOutTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  state.lutSliceFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutSliceFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.lutSliceOutTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  state.lutSliceBuf = new Uint8Array(W * H * 4);
+}
 function renderLutSlicePreview(){
   const cv = document.getElementById('lutSlicePreview');
   if (!cv) return;
@@ -2592,19 +2672,33 @@ function renderLutSlicePreview(){
   const W = cv.width, H = cv.height;
   const img = ctx.createImageData(W, H);
   const dst = img.data;
-  const seeds = paletteSeeds();
-  if (seeds.length === 0){ ctx.putImageData(img, 0, 0); return; }
-  const par = state.params;
-  const real = seeds.filter(s => !s.synthetic);
-  const lumaCurve = par.lumaLook > 0 ? computeLumaCurve(real.length ? real : seeds) : null;
-  const L = Math.max(0, Math.min(1, par.lutSliceL));
+  if (!state.gl || !state.lutTex || state.palette.length === 0){
+    ctx.putImageData(img, 0, 0);
+    return;
+  }
+  const gl = state.gl;
+  _ensureLutSlicePreviewGpu();
+  const L = Math.max(0, Math.min(1, state.params.lutSliceL));
+  const prog = state.programs.lutSlice;
+  gl.useProgram(prog);
+  gl.bindVertexArray(state.vao);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutSliceFbo);
+  gl.viewport(0, 0, W, H);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLut3D'), 1);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uL'), L);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, state.lutSliceBuf);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  // Flip vertically: GL y=0 at bottom → canvas y=0 at top. With our LUT
+  // texcoord convention (texcoord.y = +b at vUV.y=1), framebuffer y=H-1 holds
+  // the +b row; after flipping, canvas y=0 → +b (top of slice).
+  const src = state.lutSliceBuf;
   for (let y = 0; y < H; y++){
-    const b = LUT_AB_RANGE - (y / (H - 1)) * 2 * LUT_AB_RANGE;
-    for (let x = 0; x < W; x++){
-      const a = -LUT_AB_RANGE + (x / (W - 1)) * 2 * LUT_AB_RANGE;
-      const [oL, oa, ob] = idwLab(L, a, b, seeds, par.lTol, par.abTol, par.softness, par.lRange, par.cRange, par.reach, lumaCurve, par.lumaLook, par.lExt, par.cExt);
-      _writeLabToRGBA(dst, (y * W + x) * 4, oL, oa, ob);
-    }
+    const srcRow = (H - 1 - y) * W * 4;
+    const dstRow = y * W * 4;
+    dst.set(src.subarray(srcRow, srcRow + W * 4), dstRow);
   }
   ctx.putImageData(img, 0, 0);
   // Anchor markers — dot size shrinks with L distance from the slice so the
