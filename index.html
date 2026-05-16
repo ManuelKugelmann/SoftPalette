@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T22:02:33Z">
+<meta name="build" content="2026-05-16T22:06:17Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:02:33Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:06:17Z</span>
   </div>
 </header>
 
@@ -2363,22 +2363,52 @@ function makeLandscapeImage(){
 // sRGB-gamut boundary — every column is as chromatic as the gamut allows.
 // Okhsl's toed lightness keeps per-row brightness uniform; no centerline
 // stripe and no per-hue L bands (Björn Ottosson 2021).
+// 5-tap Gaussian smoothing along x in linear sRGB (wraps at the hue ring).
+// Kills the small kinks the Okhsl analytic gamut intersection produces at
+// branch transitions (where one sRGB channel limits hands off to another),
+// without losing per-row brightness or breaking chroma.
+function _smoothHueRing(buf, W, H){
+  const out = new Uint8ClampedArray(buf.length);
+  const kernel = [1, 4, 6, 4, 1], ksum = 16;
+  const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const toSrgb = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
+  for (let y = 0; y < H; y++){
+    for (let x = 0; x < W; x++){
+      let sR = 0, sG = 0, sB = 0;
+      for (let k = -2; k <= 2; k++){
+        const xk = ((x + k) % W + W) % W;
+        const o = (y * W + xk) * 4;
+        const w = kernel[k + 2];
+        sR += w * toLin(buf[o]);
+        sG += w * toLin(buf[o + 1]);
+        sB += w * toLin(buf[o + 2]);
+      }
+      const o = (y * W + x) * 4;
+      out[o]     = Math.round(Math.max(0, Math.min(1, toSrgb(sR / ksum))) * 255);
+      out[o + 1] = Math.round(Math.max(0, Math.min(1, toSrgb(sG / ksum))) * 255);
+      out[o + 2] = Math.round(Math.max(0, Math.min(1, toSrgb(sB / ksum))) * 255);
+      out[o + 3] = 255;
+    }
+  }
+  return out;
+}
 function makeHuePickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
   const img = ctx.createImageData(W, H);
-  const data = img.data;
+  const raw = new Uint8ClampedArray(W * H * 4);
   for (let y = 0; y < H; y++){
     const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
       const [r, g, b] = okhslToRgb(h, 1, L / 100);
       const idx = (y * W + x) * 4;
-      data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
+      raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
     }
   }
+  img.data.set(_smoothHueRing(raw, W, H));
   ctx.putImageData(img, 0, 0);
   return cv;
 }
@@ -2670,7 +2700,7 @@ function buildHuePreviewSrc(){
       buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
   }
-  return buf;
+  return _smoothHueRing(buf, W, H);
 }
 
 // Lab → display sRGB byte triple. Writes 3 channels at dst[o..o+2].
@@ -3418,7 +3448,7 @@ function init(){
     'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.35 },
     'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.25 },
     'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.10 },
-    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.60, reach: 0.40, lExt: 0.20, cExt: 0.06, smoothness: 1, lumaLook: 0.50 },
+    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.60, reach: 0.40, lExt: 0.40, cExt: 0.18, smoothness: 1, lumaLook: 0.50 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
