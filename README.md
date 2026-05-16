@@ -31,6 +31,7 @@ construction.
 | **L tolerance (σ_L)** | Anchor's pull radius along the L axis. Small = tight luminance "stripe", large = anchor reaches across the L range |
 | **chroma tolerance (σ_ab)** | Anchor's pull radius across the A/B (chroma) plane. Small = tight color stripe, large = washy blending |
 | **softness** | IDW power exponent. `1` = mushy linear blend, `~4` = balanced, `>10` = effectively hard-nearest (sharp Voronoi cells). Operates on the *ratio* `d² / d_min²` so the transition width is scale-free — same softness behaves the same regardless of palette spacing |
+| **L range / chroma range** | Per-axis blend of the output toward the input cell's own L and C. `0` = snap fully to the anchor's nominal L/C (palette flattens the image). `1` = pass input L/C straight through (anchor only steers hue). Lets the image's lightness/saturation structure survive the palette mapping |
 | **smoothness** | Post-build separable Gaussian blur iterations on the 3D LUT (0–6). Soften Voronoi-cell boundaries left by high softness without losing the saturated anchor regions |
 | **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
 
@@ -46,11 +47,14 @@ w_i     = (d_i² / d_min²)^(−softness/2) · s_i.strength
 sumLab  = Σ w_i · s_i.Lab  /  Σ w_i        (Cartesian Lab average)
 C_avg   = Σ w_i · |s_i.ab| /  Σ w_i        (weighted source chroma)
 coh     = |sumLab.ab| / C_avg              (∈ [0, 1] — anchor agreement on hue)
-out.ab  = sumLab.ab  scaled to magnitude  mix(|sumLab.ab|, C_avg, coh)
-out.L   = sumLab.L
+anchorMag = mix(|sumLab.ab|, C_avg, coh)   (chroma-preserving rescale magnitude)
+out.|ab| = mix(anchorMag, |cell.ab|, cRange)   (blend back toward input chroma)
+out.ab   = sumLab.ab direction × out.|ab|
+out.L    = mix(sumLab.L,  cell.L, lRange)      (blend back toward input lightness)
 ```
 
-Then optionally `smoothness` iterations of separable 3D Gaussian blur on the LUT.
+Then optionally `smoothness` iterations of separable 3D Gaussian blur on the
+LUT (also chroma-preserving, same coherence trick applied per blur tap).
 
 - **L and ab tolerances** (`σ_L`, `σ_ab`) shape an anisotropic ellipsoid
   around each anchor. They are *the* "stripe" — bounded in luminance AND

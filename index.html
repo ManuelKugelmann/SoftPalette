@@ -318,6 +318,14 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="softness" min="1" max="12" step="0.1" value="4.0">
     </div>
     <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>L range <span style="color:var(--txdd)">0=snap, 1=keep image L</span></span><span class="v" id="vLRange">1.00</span></div>
+      <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image C</span></span><span class="v" id="vCRange">0.50</span></div>
+      <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>smoothness <span style="color:var(--txdd)">post-blur iters</span></span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="6" step="1" value="0">
     </div>
@@ -447,6 +455,12 @@ const state = {
     lTol: 0.5,           // σL — L axis falloff
     abTol: 0.2,          // σab — A/B axes falloff (OkLab radius scale)
     softness: 4,         // IDW power exponent; 1=linear, ∞=hard nearest
+    // Per-axis blend back toward the input cell's own L/C — 0 snaps fully to
+    // anchor, 1 passes input through unchanged (old-algorithm hue-snap behavior).
+    // Lets the image's lightness/chroma structure survive the palette mapping
+    // instead of every cell collapsing to anchor's nominal L and C.
+    lRange: 1.0,         // L preservation; default 1.0 keeps image lightness
+    cRange: 0.5,         // chroma preservation; 0.5 = halfway between anchor and input
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: synthesize a grid of (L, C) variants around each anchor.
@@ -588,9 +602,9 @@ function packSeeds(seeds){
   return buf;
 }
 
-// CPU IDW — matches FS_LUT_BUILD: scale-free softness (ratio d²/d_min²) plus
-// chroma-preserving rescale. Used for the hue preview; tracks the GPU output.
-function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
+// CPU IDW — mirrors FS_LUT_BUILD: scale-free softness, chroma-preserving
+// rescale, then per-axis blend toward input cell L and C.
+function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange){
   if (seeds.length === 0) return [L, a, b];
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
@@ -611,16 +625,19 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
     sL += w * s.L; sA += w * s.a; sB += w * s.b;
     sC += w * Math.hypot(s.a, s.b);
   }
-  const Lo = sL / sumW;
-  let   Ao = sA / sumW, Bo = sB / sumW;
+  let Lo = sL / sumW;
+  let Ao = sA / sumW, Bo = sB / sumW;
   const Cavg = sC / sumW;
-  const mag = Math.hypot(Ao, Bo);
+  const mag  = Math.hypot(Ao, Bo);
+  const cellC = Math.hypot(a, b);
   if (mag > 1e-6){
     const coh = Math.min(1, mag / Math.max(Cavg, 1e-6));
-    const target = mag + coh * (Cavg - mag);
-    Ao *= target / mag;
-    Bo *= target / mag;
+    const target   = mag + coh * (Cavg - mag);
+    const finalMag = target + cRange * (cellC - target);
+    Ao *= finalMag / mag;
+    Bo *= finalMag / mag;
   }
+  Lo = Lo + lRange * (L - Lo);
   return [Lo, Ao, Bo];
 }
 
@@ -720,6 +737,8 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaL'),  state.params.lTol);
   gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaAB'), state.params.abTol);
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLRange'),  state.params.lRange);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uCRange'),  state.params.cRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
   const uZLoc = gl.getUniformLocation(prog, 'uZ');
 
@@ -880,6 +899,8 @@ uniform float uZ;             // current L-slice index in [0, N-1]
 uniform float uSigmaL;        // anisotropic L axis
 uniform float uSigmaAB;       // anisotropic A/B axes
 uniform float uSoftness;      // IDW power exponent
+uniform float uLRange;        // 0 = snap L to anchor, 1 = passthrough cell L
+uniform float uCRange;        // 0 = snap chroma to anchor, 1 = passthrough cell C
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
 
 void main(){
@@ -931,7 +952,12 @@ void main(){
   // Rescale blended (a,b) magnitude from magAB → mix(magAB, Cavg, coherence).
   float coherence = magAB / max(Cavg, 1e-6);
   float target    = mix(magAB, Cavg, clamp(coherence, 0.0, 1.0));
-  if (magAB > 1e-6) lab.yz *= target / magAB;
+  // Per-axis blend toward input cell: keeps the image's L/C variation alive
+  // around each anchor, rather than collapsing every cell to anchor's nominal L,C.
+  float cellC     = length(vec2(a, b));
+  float finalMag  = mix(target, cellC, uCRange);
+  if (magAB > 1e-6) lab.yz *= finalMag / magAB;
+  lab.x = mix(lab.x, L, uLRange);
   fragColor = vec4(lab, 1.0);
 }`;
 
@@ -1836,12 +1862,12 @@ function renderHuePreview(){
     ctx.putImageData(img, 0, 0);
     return;
   }
-  const { lTol, abTol, softness } = state.params;
+  const { lTol, abTol, softness, lRange, cRange } = state.params;
   const src = _huePreviewSrc;
   for (let i = 0; i < W * H; i++){
     const o = i * 4;
     const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
-    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness);
+    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange);
     const lin = oklabToLinearJS(oL, oa, ob);
     const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
     const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
@@ -2204,21 +2230,26 @@ function init(){
   bindLutSlider('lTol',     'vLTol',     'lTol',     v => v.toFixed(2));
   bindLutSlider('abTol',    'vAbTol',    'abTol',    v => v.toFixed(3));
   bindLutSlider('softness',   'vSoftness',   'softness',   v => v.toFixed(1));
+  bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
+  bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT param presets — three named operating points along the soft/hard axis.
   const lutPresets = {
     // Soft: low IDW power produces inherent smoothing, no extra blur needed.
-    'soft':     { lTol: 0.7, abTol: 0.30, softness: 2.0, smoothness: 0 },
-    'balanced': { lTol: 0.5, abTol: 0.20, softness: 4.0, smoothness: 0 },
-    // Hard: near-Voronoi snap at the cell level, then 2 blur iters soften the
-    // boundaries — saturated anchor regions with smooth transitions between.
-    'hard':     { lTol: 0.3, abTol: 0.10, softness: 6.0, smoothness: 2 },
+    // High L/C range — image's structure flows through, palette just tints.
+    'soft':     { lTol: 0.7, abTol: 0.30, softness: 2.0, lRange: 1.0, cRange: 0.7, smoothness: 0 },
+    'balanced': { lTol: 0.5, abTol: 0.20, softness: 4.0, lRange: 1.0, cRange: 0.5, smoothness: 0 },
+    // Hard: near-Voronoi snap, 2 blur iters soften boundaries. Lower cRange
+    // so anchors carry more chroma authority — vivid palette regions.
+    'hard':     { lTol: 0.3, abTol: 0.10, softness: 6.0, lRange: 0.8, cRange: 0.3, smoothness: 2 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
     abTol:      ['abTol',      'vAbTol',      v => v.toFixed(3)],
     softness:   ['softness',   'vSoftness',   v => v.toFixed(1)],
+    lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
+    cRange:     ['cRange',     'vCRange',     v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
   };
   function applyLutPreset(name){
