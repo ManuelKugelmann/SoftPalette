@@ -307,6 +307,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
     </div>
     <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>reach <span style="color:var(--txdd)">desat beyond this Lab dist to nearest anchor</span></span><span class="v" id="vReach">0.25</span></div>
+      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
+    </div>
+    <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>smoothness <span style="color:var(--txdd)">post-blur iters (each ~3% cube)</span></span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="12" step="1" value="0">
     </div>
@@ -462,6 +466,9 @@ const state = {
     // instead of every cell collapsing to anchor's nominal L and C.
     lRange: 1.0,         // L preservation; default 1.0 keeps image lightness
     cRange: 0.5,         // chroma preservation; 0.5 = halfway between anchor and input
+    reach:  0.25,        // anchor rejection radius (absolute OkLab units). Beyond
+                         // this Lab distance to the nearest anchor, output desat
+                         // urates — palette has no good answer for that cell.
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: synthesize a grid of (L, C) variants around each anchor.
@@ -604,17 +611,20 @@ function packSeeds(seeds){
 }
 
 // CPU IDW — mirrors FS_LUT_BUILD: scale-free softness, chroma-preserving
-// rescale, then per-axis blend toward input cell L and C.
-function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange){
+// rescale, per-axis blend toward input cell L and C, rejection envelope.
+function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach){
   if (seeds.length === 0) return [L, a, b];
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
   const halfP = softness * 0.5;
   let dmin2 = Infinity;
+  let dmin2_iso = Infinity;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
     const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     if (d2 < dmin2) dmin2 = d2;
+    const d2_iso = dL*dL + dA*dA + dB*dB;
+    if (d2_iso < dmin2_iso) dmin2_iso = d2_iso;
   }
   let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
   for (const s of seeds){
@@ -634,10 +644,16 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange){
   if (mag > 1e-6){
     const coh = Math.min(1, mag / Math.max(Cavg, 1e-6));
     const target   = mag + coh * (Cavg - mag);
-    const finalMag = target + cRange * (cellC - target);
+    // cRange gated by coherence — see shader comment.
+    const finalMag = target + cRange * coh * (cellC - target);
     Ao *= finalMag / mag;
     Bo *= finalMag / mag;
   }
+  // Rejection envelope — see shader comment. Isotropic distance vs uReach.
+  const r2 = dmin2_iso / Math.max(reach * reach, 1e-9);
+  const reject = Math.exp(-Math.max(r2 - 1, 0));
+  Ao *= reject;
+  Bo *= reject;
   Lo = Lo + lRange * (L - Lo);
   return [Lo, Ao, Bo];
 }
@@ -740,6 +756,7 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLRange'),  state.params.lRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCRange'),  state.params.cRange);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),   state.params.reach);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
   const uZLoc = gl.getUniformLocation(prog, 'uZ');
 
@@ -902,6 +919,7 @@ uniform float uSigmaAB;       // anisotropic A/B axes
 uniform float uSoftness;      // IDW power exponent
 uniform float uLRange;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCRange;        // 0 = snap chroma to anchor, 1 = passthrough cell C
+uniform float uReach;         // anchor rejection radius in absolute OkLab units
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
 
 void main(){
@@ -917,8 +935,10 @@ void main(){
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
   float halfP  = uSoftness * 0.5;
 
-  // Pass 1: minimum (squared, anisotropic) distance to any seed.
-  float dmin2 = 1e30;
+  // Pass 1: minimum anisotropic d² (for IDW scaling) AND minimum isotropic d²
+  // in absolute OkLab units (for the rejection envelope below).
+  float dmin2     = 1e30;
+  float dmin2_iso = 1e30;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -926,7 +946,8 @@ void main(){
     float dA = (a - s.y);
     float dB = (b - s.z);
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    dmin2 = min(dmin2, d2);
+    dmin2     = min(dmin2,     d2);
+    dmin2_iso = min(dmin2_iso, dL*dL + dA*dA + dB*dB);
   }
 
   // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma.
@@ -949,15 +970,21 @@ void main(){
   vec3  lab   = sumLab / sumW;
   float Cavg  = sumC   / sumW;
   float magAB = length(lab.yz);
-  // Coherence ∈ [0, 1]: 1 = anchors agree on hue, 0 = anchors face off.
-  // Rescale blended (a,b) magnitude from magAB → mix(magAB, Cavg, coherence).
-  float coherence = magAB / max(Cavg, 1e-6);
-  float target    = mix(magAB, Cavg, clamp(coherence, 0.0, 1.0));
-  // Per-axis blend toward input cell: keeps the image's L/C variation alive
-  // around each anchor, rather than collapsing every cell to anchor's nominal L,C.
+  float coherence = clamp(magAB / max(Cavg, 1e-6), 0.0, 1.0);
+  float target    = mix(magAB, Cavg, coherence);
+  // cRange GATED by coherence so anchor disagreement (low coh) does not amplify
+  // the noisy blend direction into a confident wrong hue.
   float cellC     = length(vec2(a, b));
-  float finalMag  = mix(target, cellC, uCRange);
+  float finalMag  = mix(target, cellC, uCRange * coherence);
   if (magAB > 1e-6) lab.yz *= finalMag / magAB;
+  // Rejection envelope: when the nearest anchor is farther than uReach (in
+  // absolute OkLab units) from this cell, the palette has no good answer.
+  // Desaturate rather than invent a hue — exp falloff outside the reach ball,
+  // identity inside. Fixes "red+blue palette + green input turning into a
+  // confident wrong hue" by collapsing chroma to grey where no anchor is close.
+  // Uses isotropic distance so it stays independent of σ_L/σ_ab tolerances.
+  float r2 = dmin2_iso / max(uReach * uReach, 1e-9);
+  lab.yz *= exp(-max(r2 - 1.0, 0.0));
   lab.x = mix(lab.x, L, uLRange);
   fragColor = vec4(lab, 1.0);
 }`;
@@ -1863,12 +1890,12 @@ function renderHuePreview(){
     ctx.putImageData(img, 0, 0);
     return;
   }
-  const { lTol, abTol, softness, lRange, cRange } = state.params;
+  const { lTol, abTol, softness, lRange, cRange, reach } = state.params;
   const src = _huePreviewSrc;
   for (let i = 0; i < W * H; i++){
     const o = i * 4;
     const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
-    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange);
+    const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange, reach);
     const lin = oklabToLinearJS(oL, oa, ob);
     const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
     const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
@@ -2251,6 +2278,7 @@ function init(){
   })();
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
+  bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT param presets — three named operating points along the soft/hard axis.
@@ -2260,24 +2288,25 @@ function init(){
     // Tint: wide ellipsoids + softest IDW. Each anchor barely pulls. With
     // lRange=1 the image's lightness is untouched and cRange=0.7 keeps most
     // of its chroma — the palette acts as a gentle hue tint over the photo.
-    'tint':     { lTol: 1.0, abTol: 0.30,  softness: 1.0, lRange: 1.0, cRange: 0.70, smoothness: 0 },
+    'tint':     { lTol: 1.0, abTol: 0.30,  softness: 1.0, lRange: 1.0, cRange: 0.70, reach: 0.25, smoothness: 0 },
     // Vivid: very narrow chroma tolerance + wide L tolerance + soft IDW.
     // Anchors carve crisp hue regions while accepting a wide L range, so the
     // image's lightness flows through and chroma snaps toward palette directions.
-    'vivid':    { lTol: 0.3, abTol: 0.020, softness: 2.0, lRange: 1.0, cRange: 0.29, smoothness: 0 },
+    'vivid':    { lTol: 0.3, abTol: 0.020, softness: 2.0, lRange: 1.0, cRange: 0.29, reach: 0.25, smoothness: 0 },
     // Soft: low IDW power produces inherent smoothing, no extra blur needed.
     // High L/C range — image's structure flows through, palette just tints.
-    'soft':     { lTol: 0.7, abTol: 0.30,  softness: 2.0, lRange: 1.0, cRange: 0.7,  smoothness: 0 },
-    'balanced': { lTol: 0.5, abTol: 0.20,  softness: 4.0, lRange: 1.0, cRange: 0.5,  smoothness: 0 },
+    'soft':     { lTol: 0.7, abTol: 0.30,  softness: 2.0, lRange: 1.0, cRange: 0.7,  reach: 0.25, smoothness: 0 },
+    'balanced': { lTol: 0.5, abTol: 0.20,  softness: 4.0, lRange: 1.0, cRange: 0.5,  reach: 0.25, smoothness: 0 },
     // Hard: near-Voronoi snap, 2 blur iters soften boundaries. Lower cRange
     // so anchors carry more chroma authority — vivid palette regions.
-    'hard':     { lTol: 0.3, abTol: 0.10,  softness: 6.0, lRange: 0.8, cRange: 0.3,  smoothness: 2 },
+    'hard':     { lTol: 0.3, abTol: 0.10,  softness: 6.0, lRange: 0.8, cRange: 0.3,  reach: 0.20, smoothness: 2 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
     abTol:      ['abTol',      'vAbTol',      v => v.toFixed(3)],
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     cRange:     ['cRange',     'vCRange',     v => v.toFixed(2)],
+    reach:      ['reach',      'vReach',      v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
   };
   function applyLutPreset(name){
