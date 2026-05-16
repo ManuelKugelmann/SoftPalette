@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T22:32:41Z">
+<meta name="build" content="2026-05-16T22:48:37Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:32:41Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:48:37Z</span>
   </div>
 </header>
 
@@ -286,7 +286,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- CENTER -->
 <section class="center">
   <div id="imageTabs" class="tabs">
-    <button id="hueImage"       class="tab" title="Hue × Lightness gradient — at-a-glance palette coverage test">hues</button>
+    <button id="hueImage"       class="tab" title="Smoothed Okhsl picker (perceptual L, per-hue gamut max chroma)">hues</button>
+    <button id="okhplImage"     class="tab" title="Ok-HPLuv-boost: uniform chroma across hues per row, smoother than Okhsl in the deep-blue region">ok-hpl+</button>
     <button id="hsvImage"       class="tab" title="Literal HSV cylinder — reference image with the band artifacts (bright yellow / dark blue) for comparison">hsv ref</button>
     <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
     <button id="photoImage"     class="tab" title="Procedural still-life (apples on wood)">still-life</button>
@@ -776,6 +777,49 @@ function okhslToRgb(h, s, l){
     }
     aa = C * a_; bb = C * b_;
   }
+  const lin = oklabToLinearJS(L, aa, bb);
+  const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+  const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+  const c = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(c * 255)];
+}
+// Ok-HPLuv-boost: HPLuv concept (chroma uniform across hues at each L) but in
+// OkLab. At each OkLab L we find the smallest in-gamut chroma across all hues
+// (the gamut bottleneck — typically the deep-blue corner), then sweep at
+// boost × that floor. Some hues clip per channel where boost pushes past
+// their HSLuv cap; most stay at the uniform boosted chroma. Smoother than
+// Okhsl's per-hue cusp (no polynomial-branch handoff) while keeping more
+// saturation than plain HPLuv.
+const _okhplLut = new Float32Array(256);
+let _okhplLutReady = false;
+function _ensureOkhplLut(){
+  if (_okhplLutReady) return;
+  for (let i = 0; i < 256; i++){
+    const L = i / 255;
+    let minC = Infinity;
+    for (let h = 0; h < 360; h += 3){
+      const hr = h * Math.PI / 180;
+      const a = Math.cos(hr), b = Math.sin(hr);
+      const cusp = _okhslCusp(a, b);
+      const Cmax = _okhslGamutIntersection(a, b, L, 1, L, cusp);
+      if (Cmax < minC) minC = Cmax;
+    }
+    _okhplLut[i] = isFinite(minC) ? minC : 0;
+  }
+  _okhplLutReady = true;
+}
+function okhplBoostedToRgb(h, s, l, boost){
+  if (l >= 1) return [255, 255, 255];
+  if (l <= 0) return [0, 0, 0];
+  _ensureOkhplLut();
+  const L = _okhslToeInv(l);
+  const f = Math.max(0, Math.min(1, L)) * 255;
+  const i0 = Math.floor(f), i1 = Math.min(255, i0 + 1);
+  const t = f - i0;
+  const minC = _okhplLut[i0] * (1 - t) + _okhplLut[i1] * t;
+  const C = boost * s * minC;
+  const hr = h * Math.PI / 180;
+  const aa = C * Math.cos(hr), bb = C * Math.sin(hr);
   const lin = oklabToLinearJS(L, aa, bb);
   const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
   const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
@@ -2369,29 +2413,35 @@ function makeLandscapeImage(){
 // branch transitions (where one sRGB channel limits hands off to another),
 // without losing per-row brightness or breaking chroma.
 function _smoothHueRing(buf, W, H){
-  const out = new Uint8ClampedArray(buf.length);
   const kernel = [1, 4, 6, 4, 1], ksum = 16;
   const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
   const toSrgb = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
-  for (let y = 0; y < H; y++){
-    for (let x = 0; x < W; x++){
-      let sR = 0, sG = 0, sB = 0;
-      for (let k = -2; k <= 2; k++){
-        const xk = ((x + k) % W + W) % W;
-        const o = (y * W + xk) * 4;
-        const w = kernel[k + 2];
-        sR += w * toLin(buf[o]);
-        sG += w * toLin(buf[o + 1]);
-        sB += w * toLin(buf[o + 2]);
+  // Two passes: a single 5-tap kernel left a visible step in the deep-blue
+  // region where Okhsl's compute_max_saturation polynomial handoff sits.
+  // Two passes effectively widen the kernel without enlarging it per pass.
+  function pass(src){
+    const out = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < H; y++){
+      for (let x = 0; x < W; x++){
+        let sR = 0, sG = 0, sB = 0;
+        for (let k = -2; k <= 2; k++){
+          const xk = ((x + k) % W + W) % W;
+          const o = (y * W + xk) * 4;
+          const w = kernel[k + 2];
+          sR += w * toLin(src[o]);
+          sG += w * toLin(src[o + 1]);
+          sB += w * toLin(src[o + 2]);
+        }
+        const o = (y * W + x) * 4;
+        out[o]     = Math.round(Math.max(0, Math.min(1, toSrgb(sR / ksum))) * 255);
+        out[o + 1] = Math.round(Math.max(0, Math.min(1, toSrgb(sG / ksum))) * 255);
+        out[o + 2] = Math.round(Math.max(0, Math.min(1, toSrgb(sB / ksum))) * 255);
+        out[o + 3] = 255;
       }
-      const o = (y * W + x) * 4;
-      out[o]     = Math.round(Math.max(0, Math.min(1, toSrgb(sR / ksum))) * 255);
-      out[o + 1] = Math.round(Math.max(0, Math.min(1, toSrgb(sG / ksum))) * 255);
-      out[o + 2] = Math.round(Math.max(0, Math.min(1, toSrgb(sB / ksum))) * 255);
-      out[o + 3] = 255;
     }
+    return out;
   }
-  return out;
+  return pass(pass(buf));
 }
 function makeHuePickerImage(){
   const W = 720, H = 460;
@@ -2454,6 +2504,31 @@ function makeHsvReferenceImage(){
       data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
     }
   }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
+// Ok-HPLuv-boost picker: uniform chroma per L in OkLab (smallest in-gamut
+// chroma across hues at this L) scaled by boost. Trades a little vividness
+// for true cross-hue uniformity; no Okhsl per-hue cusp polynomial branches,
+// so no blue-handoff step. Same Gaussian smoothing on top.
+function makeOkhplPickerImage(){
+  const W = 720, H = 460;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const raw = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++){
+    const l = 1 - y / (H - 1);
+    for (let x = 0; x < W; x++){
+      const h = (x / W) * 360;
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, 1.6);
+      const idx = (y * W + x) * 4;
+      raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
+    }
+  }
+  img.data.set(_smoothHueRing(raw, W, H));
   ctx.putImageData(img, 0, 0);
   return cv;
 }
@@ -2610,6 +2685,9 @@ function loadHueImage(){
 }
 function loadHsvRefImage(){
   installCanvas(makeHsvReferenceImage(), 'synthetic · hsv reference');
+}
+function loadOkhplImage(){
+  installCanvas(makeOkhplPickerImage(), 'synthetic · ok-hpluv·boost');
 }
 function loadPhotoImage(){
   installCanvas(makePhotoImage(), 'synthetic · still life');
@@ -3356,6 +3434,7 @@ function init(){
   }
   bindImageBtn('resetImage',     loadDefaultImage);
   bindImageBtn('hueImage',       loadHueImage);
+  bindImageBtn('okhplImage',     loadOkhplImage);
   bindImageBtn('hsvImage',       loadHsvRefImage);
   bindImageBtn('photoImage',     loadPhotoImage);
   bindImageBtn('portraitImage',  loadPortraitImage);
