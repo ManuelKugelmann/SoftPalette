@@ -318,8 +318,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
       <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
       <button data-lutpreset="vivid"     title="Sharp hue separation, wide L acceptance">vivid</button>
-      <button data-lutpreset="hard"      title="Anchor-dominant, blur-softened boundaries">hard</button>
-      <button data-lutpreset="posterize" title="Extreme hard — full Voronoi snap, palette colors only">posterize</button>
+      <button data-lutpreset="hard"      title="Near-Voronoi snap — palette colors only, soft seams">hard</button>
     </div>
     <div class="slider">
       <div class="lbl"><span>lut size <span style="color:var(--txdd)">cube edge</span></span><span class="v" id="vLutSize">33³</span></div>
@@ -722,7 +721,7 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
     const origC = Math.hypot(a, b);
     const expC  = Math.hypot(ea, eb);
-    const midWeight = Math.abs(L - 0.5) * 2;
+    const midWeight = 0.5 + 0.5 * Math.abs(L - 0.5) * 2;
     const lookEff   = lumaLook * midWeight;
     if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
       const cellH = Math.atan2(b, a);
@@ -1158,15 +1157,17 @@ void main(){
 
   // Luma-look: rotate this cell's (a, b) direction toward the palette's
   // L-conditional mean hue, KEEPING the cell's original chroma magnitude.
-  // The effect is also gated by midWeight = |L − 0.5| × 2 so midtones are
-  // barely touched and only shadows / highlights get the full tint shift.
-  // Direction rotation (vs. mix toward the curve point) means luma look
-  // never adds or removes saturation — it only re-aims hue along the
-  // palette's learned axis (teal-orange-style: cool shadows, warm highlights).
+  // The effect is gated by midWeight so shadows / highlights get the full
+  // tint shift while midtones get ~half. Direction rotation (vs. mix toward
+  // the curve point) means luma look never adds or removes saturation —
+  // it only re-aims hue along the palette's learned axis.
   vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
   float origC   = length(vec2(a, b));
   float expC    = length(expected);
-  float midWeight = abs(L - 0.5) * 2.0;
+  // Always at least 0.5 effect — midtones lose half intensity, extremes get
+  // the full slider value. Plateau-style ramp (range [0.5, 1.0]) so the user
+  // doesn't see a dead zone at L≈0.5.
+  float midWeight = 0.5 + 0.5 * abs(L - 0.5) * 2.0;
   float lookEff   = uLumaLook * midWeight;
   if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
     float cellH = atan(b, a);
@@ -2605,12 +2606,10 @@ function init(){
     // Sharp hue separation, wide L acceptance — palette carves crisp hue
     // regions while image lightness flows through.
     'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.40, reach: 0.30, smoothness: 2 },
-    // Anchor-dominant: near-Voronoi cells, blur softens boundaries. Image L
-    // partially preserved but palette controls hue+chroma firmly.
-    'hard':      { lTol: 0.3, abTol: 0.10, softness: 8.0,  lRange: 0.8, cRange: 0.25, reach: 0.20, smoothness: 3 },
-    // Extreme hard: full Voronoi snap, anchor chroma exact (cRange=0). Looks
-    // like an explicit color quantization with smoothed seams.
-    'posterize': { lTol: 0.2, abTol: 0.08, softness: 12.0, lRange: 0.5, cRange: 0.0,  reach: 0.15, smoothness: 1 },
+    // Hard / near-Voronoi snap: full IDW exponent, tight tolerances, anchor
+    // chroma exact (cRange=0), palette controls L too (lRange=0.5). One blur
+    // iter softens cell seams without melting the palette regions.
+    'hard':      { lTol: 0.25, abTol: 0.08, softness: 12.0, lRange: 0.5, cRange: 0.0, reach: 0.18, smoothness: 1 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
