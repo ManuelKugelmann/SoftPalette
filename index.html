@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T19:57:34Z">
+<meta name="build" content="2026-05-16T20:00:22Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:57:34Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:00:22Z</span>
   </div>
 </header>
 
@@ -708,10 +708,11 @@ function paletteSeeds(){
   //     (smooths overlapping contributions from different anchors).
   function walkAxis(stepCount, stepFn, tol){
     if (stepCount <= 0) return;
-    // Snapshot of anchors at the start of this pass — extensions only walk
-    // FROM real anchors (not from synths added by H pass), avoiding compound
-    // growth where synths spawn new synths in unexpected directions.
-    const sources = out.filter(s => !s.synthetic);
+    // Snapshot of anchors at the start of this pass. Includes synths added
+    // by EARLIER passes (H synths feed into C; H+C synths feed into L). Does
+    // NOT include synths added during THIS pass — those are not re-walked,
+    // which prevents runaway compounding within a single axis.
+    const sources = out.slice();
     for (const s of sources){
       if (out.length >= MAX_PAL) break;
       for (const dir of [+1, -1]){
