@@ -721,12 +721,12 @@ function uploadSeeds(packed){
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_PAL, 1, gl.RGBA, gl.FLOAT, packed);
 }
 
-// Write the exact anchor Lab into the nearest LUT cell, per anchor. Used as
+// Write the exact seed Lab into the nearest LUT cell, per seed. Used as
 // the closing step of each blur iteration so anchor cells survive smoothing
 // (without this, repeated blur diffuses anchor values into their neighborhoods).
-// Synthetic seeds are excluded — those are interpolated approximations and
-// don't represent precise user-set targets.
-function stampAnchors(targetTex, N){
+// Includes auto-extend synth seeds — those are user-curated too (the user
+// configured the spread, so the resulting constellation IS the intended palette).
+function stampAnchors(targetTex, N, seeds){
   const gl = state.gl;
   const prog = state.programs.lutStamp;
   gl.useProgram(prog);
@@ -734,18 +734,14 @@ function stampAnchors(targetTex, N){
   const uLab = gl.getUniformLocation(prog, 'uStampLab');
   gl.viewport(0, 0, N, N);
   gl.enable(gl.SCISSOR_TEST);
-  // Iterate REAL palette anchors only (not the synthetic spread variants —
-  // those are derived, not user-set ground truth).
-  for (const p of state.palette){
-    const [r,g,b] = hexToRgb(p.hex);
-    const lab = rgbToOklab(r, g, b);
-    // Map Lab → cell indices (nearest cell, clamped).
-    const li = Math.max(0, Math.min(N-1, Math.round(lab[0] * (N-1))));
-    const ai = Math.max(0, Math.min(N-1, Math.round((lab[1] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
-    const bi = Math.max(0, Math.min(N-1, Math.round((lab[2] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
+  for (const s of seeds){
+    // Map seed Lab → cell indices (nearest cell, clamped to cube bounds).
+    const li = Math.max(0, Math.min(N-1, Math.round(s.L * (N-1))));
+    const ai = Math.max(0, Math.min(N-1, Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
+    const bi = Math.max(0, Math.min(N-1, Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
     gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, targetTex, 0, li);
     gl.scissor(ai, bi, 1, 1);
-    gl.uniform3f(uLab, lab[0], lab[1], lab[2]);
+    gl.uniform3f(uLab, s.L, s.a, s.b);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.disable(gl.SCISSOR_TEST);
@@ -802,8 +798,8 @@ function recomputeLut(){
   }
 
   // Anchor stamp right after the IDW build — guarantees that the LUT cell at
-  // every anchor's Lab holds the anchor's EXACT value before any blur runs.
-  stampAnchors(state.lutTex, N);
+  // every seed's Lab holds the seed's EXACT value before any blur runs.
+  stampAnchors(state.lutTex, N, seeds);
 
   // Smoothness post-pass: per iter = 3 separable axis-blurs (a, b, L), then
   // re-stamp the anchors. With anchor injection between iters, the LUT
@@ -835,19 +831,19 @@ function recomputeLut(){
         }
         const tmp = src; src = dst; dst = tmp;
       }
-      // Re-stamp anchors on the just-blurred src — anchor cells stay exact
+      // Re-stamp seeds on the just-blurred src — seed cells stay exact
       // through subsequent blur iters instead of diffusing away.
-      stampAnchors(src, N);
+      stampAnchors(src, N, seeds);
     }
     state.lutTex  = src;
     state.lutTex2 = dst;
   }
 
-  // Final stamp: ensures the LUT the per-pixel shader samples has anchor cells
+  // Final stamp: ensures the LUT the per-pixel shader samples has seed cells
   // at their precise Lab even when smoothness=0 (in which case the loop above
   // never ran, so only the initial stamp guaranteed it; this is a no-op in
   // that case since the cells already hold the stamped values).
-  stampAnchors(state.lutTex, N);
+  stampAnchors(state.lutTex, N, seeds);
 
   // Restore default framebuffer / viewport.
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
