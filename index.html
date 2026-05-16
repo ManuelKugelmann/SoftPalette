@@ -314,11 +314,12 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>lut parameters</h2>
     <div class="row full" style="margin-bottom:8px">
-      <button data-lutpreset="tint"     title="Gentle hue tint — wide tolerances, soft IDW, high passthrough">tint</button>
-      <button data-lutpreset="vivid"    title="Sharp hue, wide L — narrow chroma tolerance, vivid rainbow regions">vivid</button>
-      <button data-lutpreset="soft"     title="Smooth IDW blend, palette colors gently dominant">soft</button>
-      <button data-lutpreset="balanced" title="Middle of the road">balanced</button>
-      <button data-lutpreset="hard"     title="Near-Voronoi snap with blur softening boundaries">hard</button>
+      <button data-lutpreset="wash"      title="Extreme soft — palette adds a faint wash of color">wash</button>
+      <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
+      <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
+      <button data-lutpreset="vivid"     title="Sharp hue separation, wide L acceptance">vivid</button>
+      <button data-lutpreset="hard"      title="Anchor-dominant, blur-softened boundaries">hard</button>
+      <button data-lutpreset="posterize" title="Extreme hard — full Voronoi snap, palette colors only">posterize</button>
     </div>
     <div class="slider">
       <div class="lbl"><span>lut size <span style="color:var(--txdd)">cube edge</span></span><span class="v" id="vLutSize">33³</span></div>
@@ -710,16 +711,29 @@ function packSeeds(seeds){
 // preserving rescale, per-axis blend toward input cell L and C, rejection.
 function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook){
   if (seeds.length === 0) return [L, a, b];
-  // Luma-look pre-shift: lerp (a, b) toward palette's L-conditional mean.
-  // lumaCurve is the precomputed 16×4 Float32 buffer (rg per bin), or null.
+  // Luma-look: hue-only rotation toward palette's L-conditional mean direction.
+  // Preserves cell's chroma magnitude. Gated by midWeight so midtones are
+  // less affected. Mirrors the shader exactly.
   if (lumaCurve && lumaLook > 0){
     const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
     const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
     const t = f - i0;
     const ea = lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t;
     const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
-    a = a + lumaLook * (ea - a);
-    b = b + lumaLook * (eb - b);
+    const origC = Math.hypot(a, b);
+    const expC  = Math.hypot(ea, eb);
+    const midWeight = Math.abs(L - 0.5) * 2;
+    const lookEff   = lumaLook * midWeight;
+    if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
+      const cellH = Math.atan2(b, a);
+      const expH  = Math.atan2(eb, ea);
+      let dh = expH - cellH;
+      if (dh >  Math.PI) dh -= 2 * Math.PI;
+      if (dh < -Math.PI) dh += 2 * Math.PI;
+      const newH = cellH + lookEff * dh;
+      a = origC * Math.cos(newH);
+      b = origC * Math.sin(newH);
+    }
   }
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
@@ -1142,15 +1156,29 @@ void main(){
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
 
-  // Luma-look pre-shift: pull this cell's (a, b) toward the palette's
-  // L-conditional mean hue. LINEAR sampling interpolates across L bins
-  // naturally. uLumaLook=0 → no shift, =1 → cell sits at the palette's
-  // expected hue for its L. Captures teal-orange-style L↔hue correlation:
-  // the dark cells get pulled toward palette's dark-anchor hue, bright cells
-  // toward bright-anchor hue, regardless of the cell's input hue.
+  // Luma-look: rotate this cell's (a, b) direction toward the palette's
+  // L-conditional mean hue, KEEPING the cell's original chroma magnitude.
+  // The effect is also gated by midWeight = |L − 0.5| × 2 so midtones are
+  // barely touched and only shadows / highlights get the full tint shift.
+  // Direction rotation (vs. mix toward the curve point) means luma look
+  // never adds or removes saturation — it only re-aims hue along the
+  // palette's learned axis (teal-orange-style: cool shadows, warm highlights).
   vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
-  vec2 ab = mix(vec2(a, b), expected, uLumaLook);
-  a = ab.x; b = ab.y;
+  float origC   = length(vec2(a, b));
+  float expC    = length(expected);
+  float midWeight = abs(L - 0.5) * 2.0;
+  float lookEff   = uLumaLook * midWeight;
+  if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
+    float cellH = atan(b, a);
+    float expH  = atan(expected.y, expected.x);
+    float dh    = expH - cellH;
+    // Shortest-arc wrap to [-π, π].
+    if (dh >  3.14159265) dh -= 6.28318531;
+    if (dh < -3.14159265) dh += 6.28318531;
+    float newH = cellH + lookEff * dh;
+    a = origC * cos(newH);
+    b = origC * sin(newH);
+  }
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
@@ -2563,24 +2591,26 @@ function init(){
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT param presets — three named operating points along the soft/hard axis.
-  // Presets carry softness as the internal IDW exponent (1=mushy, 12=hard).
-  // The softness slider displays the inverted position so high = soft.
+  // LUT presets — six points from "barely tint" to "fully posterize." All
+  // include at least one blur+stamp smoothness iteration. softness is stored
+  // as the internal IDW exponent (1=mushy, 12=hard); the slider displays the
+  // inverse so higher slider position = softer.
   const lutPresets = {
-    // Tint: wide ellipsoids + softest IDW. Each anchor barely pulls. With
-    // lRange=1 the image's lightness is untouched and cRange=0.7 keeps most
-    // of its chroma — the palette acts as a gentle hue tint over the photo.
-    'tint':     { lTol: 1.0, abTol: 0.30,  softness: 1.0, lRange: 1.0, cRange: 0.70, reach: 0.25, smoothness: 0 },
-    // Vivid: very narrow chroma tolerance + wide L tolerance + soft IDW.
-    // Anchors carve crisp hue regions while accepting a wide L range, so the
-    // image's lightness flows through and chroma snaps toward palette directions.
-    'vivid':    { lTol: 0.3, abTol: 0.020, softness: 2.0, lRange: 1.0, cRange: 0.29, reach: 0.25, smoothness: 0 },
-    // Soft: low IDW power produces inherent smoothing, no extra blur needed.
-    // High L/C range — image's structure flows through, palette just tints.
-    'soft':     { lTol: 0.7, abTol: 0.30,  softness: 2.0, lRange: 1.0, cRange: 0.7,  reach: 0.25, smoothness: 0 },
-    'balanced': { lTol: 0.5, abTol: 0.20,  softness: 4.0, lRange: 1.0, cRange: 0.5,  reach: 0.25, smoothness: 0 },
-    // Hard: near-Voronoi snap, 2 blur iters soften boundaries. Lower cRange
-    // so anchors carry more chroma authority — vivid palette regions.
-    'hard':     { lTol: 0.3, abTol: 0.10,  softness: 6.0, lRange: 0.8, cRange: 0.3,  reach: 0.20, smoothness: 2 },
+    // Extreme soft: image dominates, palette adds a faint wash of color.
+    'wash':      { lTol: 1.0, abTol: 0.40, softness: 1.0,  lRange: 1.0, cRange: 0.85, reach: 0.40, smoothness: 1 },
+    // Gentle: smooth IDW blend, image structure clear, palette tints visibly.
+    'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2 },
+    // Middle of the road.
+    'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, smoothness: 2 },
+    // Sharp hue separation, wide L acceptance — palette carves crisp hue
+    // regions while image lightness flows through.
+    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.40, reach: 0.30, smoothness: 2 },
+    // Anchor-dominant: near-Voronoi cells, blur softens boundaries. Image L
+    // partially preserved but palette controls hue+chroma firmly.
+    'hard':      { lTol: 0.3, abTol: 0.10, softness: 8.0,  lRange: 0.8, cRange: 0.25, reach: 0.20, smoothness: 3 },
+    // Extreme hard: full Voronoi snap, anchor chroma exact (cRange=0). Looks
+    // like an explicit color quantization with smoothed seams.
+    'posterize': { lTol: 0.2, abTol: 0.08, softness: 12.0, lRange: 0.5, cRange: 0.0,  reach: 0.15, smoothness: 1 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
