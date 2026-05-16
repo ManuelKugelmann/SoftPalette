@@ -721,6 +721,36 @@ function uploadSeeds(packed){
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_PAL, 1, gl.RGBA, gl.FLOAT, packed);
 }
 
+// Write the exact anchor Lab into the nearest LUT cell, per anchor. Used as
+// the closing step of each blur iteration so anchor cells survive smoothing
+// (without this, repeated blur diffuses anchor values into their neighborhoods).
+// Synthetic seeds are excluded — those are interpolated approximations and
+// don't represent precise user-set targets.
+function stampAnchors(targetTex, N){
+  const gl = state.gl;
+  const prog = state.programs.lutStamp;
+  gl.useProgram(prog);
+  gl.bindVertexArray(state.vao);
+  const uLab = gl.getUniformLocation(prog, 'uStampLab');
+  gl.viewport(0, 0, N, N);
+  gl.enable(gl.SCISSOR_TEST);
+  // Iterate REAL palette anchors only (not the synthetic spread variants —
+  // those are derived, not user-set ground truth).
+  for (const p of state.palette){
+    const [r,g,b] = hexToRgb(p.hex);
+    const lab = rgbToOklab(r, g, b);
+    // Map Lab → cell indices (nearest cell, clamped).
+    const li = Math.max(0, Math.min(N-1, Math.round(lab[0] * (N-1))));
+    const ai = Math.max(0, Math.min(N-1, Math.round((lab[1] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
+    const bi = Math.max(0, Math.min(N-1, Math.round((lab[2] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N-1))));
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, targetTex, 0, li);
+    gl.scissor(ai, bi, 1, 1);
+    gl.uniform3f(uLab, lab[0], lab[1], lab[2]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.disable(gl.SCISSOR_TEST);
+}
+
 // Rebuild the 3D LUT on the GPU: N fragment-shader passes, one per L-slice.
 // Each pass writes an N×N (a, b) plane via framebufferTextureLayer.
 function recomputeLut(){
@@ -771,12 +801,16 @@ function recomputeLut(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  // Smoothness post-pass: separable Gaussian blur on the 3D LUT.
-  // Per iteration: 3 axis-passes (a, b, L), ping-ponging between lutTex/lutTex2.
-  // Odd iteration count would leave the final result in lutTex2, so we always
-  // pong back to lutTex on the last axis-pass (axes per iter is 3, so the
-  // final pong direction depends on total pass count's parity — we explicitly
-  // track src/dst and swap state.lutTex/lutTex2 at the end if needed).
+  // Anchor stamp right after the IDW build — guarantees that the LUT cell at
+  // every anchor's Lab holds the anchor's EXACT value before any blur runs.
+  stampAnchors(state.lutTex, N);
+
+  // Smoothness post-pass: per iter = 3 separable axis-blurs (a, b, L), then
+  // re-stamp the anchors. With anchor injection between iters, the LUT
+  // approaches a harmonic interpolation of the anchors across the cube —
+  // anchor cells are fixed boundary conditions, everything else relaxes to
+  // a smooth gradient through them. Many iters → cleaner long-range
+  // gradients, no Voronoi-cell artifacts, anchors remain pixel-exact.
   const iters = Math.max(0, Math.round(state.params.smoothness || 0));
   if (iters > 0){
     const blurProg = state.programs.lutBlur;
@@ -785,10 +819,11 @@ function recomputeLut(){
     const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
     const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
     const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
-    gl.uniform1i(uBlurSrc, 1);
     const axes = [[1,0,0], [0,1,0], [0,0,1]];
     let src = state.lutTex, dst = state.lutTex2;
     for (let it = 0; it < iters; it++){
+      gl.useProgram(blurProg);
+      gl.uniform1i(uBlurSrc, 1);
       for (const ax of axes){
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_3D, src);
@@ -800,12 +835,19 @@ function recomputeLut(){
         }
         const tmp = src; src = dst; dst = tmp;
       }
+      // Re-stamp anchors on the just-blurred src — anchor cells stay exact
+      // through subsequent blur iters instead of diffusing away.
+      stampAnchors(src, N);
     }
-    // src now holds the latest result. Ensure state.lutTex points at it so the
-    // per-pixel shader samples the freshly-blurred LUT.
     state.lutTex  = src;
     state.lutTex2 = dst;
   }
+
+  // Final stamp: ensures the LUT the per-pixel shader samples has anchor cells
+  // at their precise Lab even when smoothness=0 (in which case the loop above
+  // never ran, so only the initial stamp guaranteed it; this is a no-op in
+  // that case since the cells already hold the stamped values).
+  stampAnchors(state.lutTex, N);
 
   // Restore default framebuffer / viewport.
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -989,6 +1031,16 @@ void main(){
   fragColor = vec4(lab, 1.0);
 }`;
 
+// LUT anchor stamp: writes a single LUT cell to exactly the anchor's Lab. Used
+// between blur iterations to preserve anchor values (otherwise repeated blur
+// would diffuse them away). The fragment shader just outputs uStampLab; the
+// caller sets viewport via scissor + framebufferTextureLayer to target one cell.
+const FS_LUT_STAMP = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec3 uStampLab;
+void main(){ fragColor = vec4(uStampLab, 1.0); }`;
+
 // LUT smoothness post-pass: separable 3D Gaussian blur (5-tap (1,4,6,4,1)/16)
 // with the same chroma-preserving trick as the IDW build. A plain Lab blur
 // re-introduces the brown-mush bug across Voronoi cell boundaries (averaging
@@ -1111,6 +1163,7 @@ function initGL(){
   state.programs.perPixel = program(VS, FS_PER_PIXEL);
   state.programs.lutBuild = program(VS, FS_LUT_BUILD);
   state.programs.lutBlur  = program(VS, FS_LUT_BLUR);
+  state.programs.lutStamp = program(VS, FS_LUT_STAMP);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
