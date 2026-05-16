@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>presets</h2>
     <div class="row tight">
-      <button data-preset="teal-orange">teal·orange</button>
+      <button data-preset="tealgreen-amberorange" title="Cool teals/greens at low L, warm ambers/oranges at high L">tealgreen·amberorange</button>
       <button data-preset="moebius">moebius</button>
       <button data-preset="ghibli">ghibli</button>
       <button data-preset="noir">noir·neon</button>
@@ -393,7 +393,12 @@ const LUT_SIZES = [17, 33, 65, 129, 257];
 const LUT_AB_RANGE = 0.4;        // OkLab (a,b) span: [-0.4, 0.4]
 
 const PRESETS = {
-  'teal-orange': ['#0a3a48','#2c7782','#3ab088','#e8a05e','#c44a2e'],
+  // Cool dark anchors (teal, greenish-teal) on the low-L side, warm bright
+  // anchors (orange, amber) on the high-L side. The greenish dark teal
+  // (#1f4a3a) sits with the cool cluster; the amber (#d4a040) sits with the
+  // warm cluster. The original green-teal #3ab088 has been darkened to
+  // #2a8068 so it doesn't dominate the bright half.
+  'tealgreen-amberorange': ['#0a3a48','#1f4a3a','#2c7782','#2a8068','#d4a040','#e8a05e','#c44a2e'],
   'moebius':     ['#e6c8a0','#7ca6c8','#3a4a78','#c46a4a','#5a8a5a'],
   'ghibli':      ['#a8c8e0','#5e8a5e','#e8d8a0','#c46a4a','#2c4a5a'],
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
@@ -459,7 +464,7 @@ const PRESETS = {
 };
 
 const state = {
-  palette: PRESETS['teal-orange'].map(h => ({hex: h, strength: 1.0})),
+  palette: PRESETS['tealgreen-amberorange'].map(h => ({hex: h, strength: 1.0})),
   image: null, imageW: 0, imageH: 0, imageName: '',
   imageTex: null,
   // GPU LUT (3D textures ping-pong, RGBA16F, holds OkLab per cell)
@@ -517,7 +522,7 @@ const state = {
   // user drops a custom image or edits the palette so the UI reflects truth.
   // Initial values mirror the boot defaults (sunset image, teal-orange palette).
   selectedImageBtn: 'hueImage',
-  selectedPresetBtn: 'teal-orange',
+  selectedPresetBtn: 'tealgreen-amberorange',
 };
 
 const IMAGE_BTN_IDS = ['hueImage','resetImage','photoImage','landscapeImage','animeImage','portraitImage','natureImage','parrotsImage'];
@@ -609,11 +614,37 @@ function paletteSeeds(){
   if (!par.extendPalette) return real.slice(0, MAX_PAL);
 
   const out = real.slice();
-  // Has any existing seed (real or already-added synth) within `tol` of cand?
   const collides = (cand, tol) => out.some(s =>
     Math.abs(s.L - cand.L) < tol && Math.hypot(s.a - cand.a, s.b - cand.b) < tol);
 
-  // --- L gap fill: midpoint anchors between L-adjacent real seeds ---
+  // Precompute lumaCurve so auto-extend synth seeds can be hue-rotated
+  // toward the palette's L-conditional direction at their new L. The
+  // rotation strength scales with par.lumaLook so the slider also drives
+  // how strongly auto-extended anchors follow the dark→light ramp.
+  const lumaCurve = par.lumaLook > 0 && real.length >= 2 ? computeLumaCurve(real) : null;
+  function tintByCurve(L, a, b){
+    if (!lumaCurve) return [a, b];
+    const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
+    const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
+    const t = f - i0;
+    const ea = lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t;
+    const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
+    const expC = Math.hypot(ea, eb);
+    const origC = Math.hypot(a, b);
+    if (expC < 1e-6 || origC < 1e-6) return [a, b];
+    const cellH = Math.atan2(b, a);
+    const expH  = Math.atan2(eb, ea);
+    let dh = expH - cellH;
+    if (dh >  Math.PI) dh -= 2 * Math.PI;
+    if (dh < -Math.PI) dh += 2 * Math.PI;
+    const newH = cellH + par.lumaLook * dh;
+    return [origC * Math.cos(newH), origC * Math.sin(newH)];
+  }
+
+  // --- L gap fill: midpoint anchors between L-adjacent real seeds. The
+  // synth's interpolated (a, b) is then hue-rotated toward the lumaCurve
+  // direction at its new L — so an L-spread anchor naturally follows the
+  // palette's cool-shadow / warm-highlight tendency.
   if (par.extendL > 0 && real.length >= 2){
     const sorted = real.slice().sort((x, y) => x.L - y.L);
     for (let i = 0; i < sorted.length - 1; i++){
@@ -624,12 +655,11 @@ function paletteSeeds(){
       const nNew = Math.floor(gap / par.extendL);
       for (let k = 1; k <= nNew && out.length < MAX_PAL; k++){
         const t = k / (nNew + 1);
-        out.push({
-          L: a.L + t * (b.L - a.L),
-          a: a.a + t * (b.a - a.a),
-          b: a.b + t * (b.b - a.b),
-          strength: 1.0, synthetic: true,
-        });
+        const newL = a.L + t * (b.L - a.L);
+        let newA = a.a + t * (b.a - a.a);
+        let newB = a.b + t * (b.b - a.b);
+        [newA, newB] = tintByCurve(newL, newA, newB);
+        out.push({L: newL, a: newA, b: newB, strength: 1.0, synthetic: true});
       }
     }
   }
@@ -691,6 +721,32 @@ function paletteSeeds(){
     }
   }
 
+  // --- Whitepoint / blackpoint extension: if the palette doesn't reach near
+  // L=0 or near L=1 AND lumaLook>0, insert tinted synth anchors at the missing
+  // extreme. Tint magnitude = curve magnitude × lumaLook (so the slider also
+  // drives how strongly the curve extends past the existing L range).
+  if (lumaCurve && par.lumaLook > 0 && out.length < MAX_PAL){
+    const Ls = out.map(s => s.L);
+    const minL = Math.min(...Ls), maxL = Math.max(...Ls);
+    function curveAt(L){
+      const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
+      const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
+      const t = f - i0;
+      return [
+        lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t,
+        lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t,
+      ];
+    }
+    if (minL > 0.05 && out.length < MAX_PAL){
+      const [ea, eb] = curveAt(0);
+      out.push({L: 0, a: ea * par.lumaLook, b: eb * par.lumaLook, strength: 1.0, synthetic: true});
+    }
+    if (maxL < 0.95 && out.length < MAX_PAL){
+      const [ea, eb] = curveAt(1);
+      out.push({L: 1, a: ea * par.lumaLook, b: eb * par.lumaLook, strength: 1.0, synthetic: true});
+    }
+  }
+
   return out.slice(0, MAX_PAL);
 }
 
@@ -710,32 +766,16 @@ function packSeeds(seeds){
 // preserving rescale, per-axis blend toward input cell L and C, rejection.
 function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook){
   if (seeds.length === 0) return [L, a, b];
-  // Luma-look: hue rotation + chroma-up boost toward palette's L-conditional
-  // mean. midweight collapses to 1 at lumaLook=1 (max → uniform hue ramp).
-  // Mirrors the shader.
+  // Luma-look: read expected (a, b) at this L (no pre-shift of cell); used to
+  // bias IDW weights toward palette anchors aligned with the curve direction.
+  let expA = 0, expB = 0, expC = 0;
   if (lumaCurve && lumaLook > 0){
     const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
     const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
     const t = f - i0;
-    const ea = lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t;
-    const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
-    const origC = Math.hypot(a, b);
-    const expC  = Math.hypot(ea, eb);
-    const midWeightBase = 0.5 + 0.5 * Math.abs(L - 0.5) * 2;
-    const midWeight     = midWeightBase + (1 - midWeightBase) * lumaLook;
-    const lookEff       = lumaLook * midWeight;
-    if (expC > 1e-6 && lookEff > 1e-4){
-      const cellH = origC > 1e-6 ? Math.atan2(b, a) : Math.atan2(eb, ea);
-      const expH  = Math.atan2(eb, ea);
-      let dh = expH - cellH;
-      if (dh >  Math.PI) dh -= 2 * Math.PI;
-      if (dh < -Math.PI) dh += 2 * Math.PI;
-      const newH = cellH + lookEff * dh;
-      const boostedC = Math.max(origC, expC);
-      const newC     = origC + lookEff * (boostedC - origC);
-      a = newC * Math.cos(newH);
-      b = newC * Math.sin(newH);
-    }
+    expA = lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t;
+    expB = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
+    expC = Math.hypot(expA, expB);
   }
   const invSL2 = 1 / (sigmaL * sigmaL);
   const invSA2 = 1 / (sigmaAB * sigmaAB);
@@ -750,17 +790,27 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     if (d2_iso < dmin2_iso) dmin2_iso = d2_iso;
   }
   let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
-  const cellC2 = a*a + b*b;
+  // Gate direction blends cell → curve as lumaLook → 1. Same as shader.
+  const gateAx = a + lumaLook * (expA - a);
+  const gateBx = b + lumaLook * (expB - b);
+  const gateC2 = gateAx*gateAx + gateBx*gateBx;
   for (const s of seeds){
     const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
     const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     const r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     let w = Math.pow(r2, -halfP) * s.strength;
-    // Hue-hemisphere gate — see shader comment.
     const ancC2 = s.a*s.a + s.b*s.b;
-    if (cellC2 > 1e-6 && ancC2 > 1e-6){
-      const cos_dh = (a*s.a + b*s.b) / Math.sqrt(cellC2 * ancC2);
-      w *= Math.max(0, cos_dh);
+    // (a) Soft hue gate against blended cell/curve direction.
+    if (gateC2 > 1e-6 && ancC2 > 1e-6){
+      const cos_dh = (gateAx*s.a + gateBx*s.b) / Math.sqrt(gateC2 * ancC2);
+      const t0 = Math.max(0, Math.min(1, (cos_dh + 0.2) / 0.4));
+      w *= t0 * t0 * (3 - 2 * t0);
+    }
+    // (b) Luma-look alignment bonus.
+    if (lumaLook > 0 && expC > 1e-6 && ancC2 > 1e-6){
+      const dotE = (expA*s.a + expB*s.b) / (expC * Math.sqrt(ancC2));
+      const bonus = 0.5 + 0.5 * dotE;
+      w *= 1 + lumaLook * (bonus - 1);
     }
     sumW += w;
     sL += w * s.L; sA += w * s.a; sB += w * s.b;
@@ -875,24 +925,28 @@ function computeLumaCurve(seeds){
   const half = Math.max(1, Math.floor(sorted.length / 2));
   const lower = sorted.slice(0, half);
   const upper = sorted.slice(sorted.length - half);
-  // Per-cluster weighted mean.
-  //   dark cluster:  weight = (1 - L) × C × strength   (favors dark + saturated)
-  //   light cluster: weight =     L   × C × strength   (favors bright + saturated)
-  function clusterMean(group, isDark){
+  // Per-cluster weighted mean. Gaussian falloff from the cluster's L
+  // EXTREME (darkest L for the dark cluster, lightest L for the light
+  // cluster), σ=0.05 — the very extreme anchor dominates while nearby
+  // anchors at similar L still contribute. Multiplied by chroma so
+  // saturated anchors carry more authority than greyish ones.
+  const sigma = 0.05;
+  const inv2s2 = 1 / (2 * sigma * sigma);
+  function clusterMean(group, Ltarget){
     let sumW = 1e-12, sA = 0, sB = 0, sL = 0;
     for (const s of group){
-      const C = Math.hypot(s.a, s.b);
-      const Lw = isDark ? (1 - s.L) : s.L;
-      const w = Lw * C * s.strength;
+      const dL = s.L - Ltarget;
+      const C  = Math.hypot(s.a, s.b);
+      const w  = Math.exp(-dL * dL * inv2s2) * C * s.strength;
       sumW += w;
-      sA += w * s.a;
-      sB += w * s.b;
-      sL += w * s.L;
+      sA   += w * s.a;
+      sB   += w * s.b;
+      sL   += w * s.L;
     }
     return { a: sA / sumW, b: sB / sumW, L: sL / sumW };
   }
-  const dark  = clusterMean(lower, true);
-  const light = clusterMean(upper, false);
+  const dark  = clusterMean(lower, lower[0].L);                     // darkest L in dark half
+  const light = clusterMean(upper, upper[upper.length - 1].L);      // lightest L in light half
   // Smoothstep crossover across L using the cluster L means as endpoints.
   for (let i = 0; i < LUMA_BINS; i++){
     const L = i / (LUMA_BINS - 1);
@@ -1184,37 +1238,15 @@ void main(){
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
 
-  // Luma-look: rotate cell hue toward the palette's L-conditional mean hue,
-  // optionally boosting chroma toward the palette's expected magnitude. The
-  // strength is gated by midWeight so partial slider values mostly affect
-  // shadows/highlights, but at slider max the midweight collapses to 1 and
-  // every L gets the full rotation — producing a true lightness-based hue
-  // ramp (input hue erased, output hue purely from palette L profile).
-  // Chroma is boosted only UPWARD (max(orig, exp)) so luma look never
-  // desaturates; saturated inputs are unchanged, grey/low-C inputs gain
-  // tint at the palette's expected chroma.
+  // Luma-look: read the palette's L-conditional expected direction (curve)
+  // at this cell's L. We do NOT pre-shift the cell — that would override the
+  // palette. Instead, the curve direction is used in IDW Pass 2 to bias
+  // anchor weights: anchors aligned with the curve at this L are boosted,
+  // anchors opposite are suppressed. The palette still drives the output;
+  // luma look just gently tilts which anchors win at each L, producing a
+  // smooth dark→light hue ramp without erasing palette character.
   vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
-  float origC   = length(vec2(a, b));
   float expC    = length(expected);
-  // midWeight base curve = [0.5, 1.0] (plateau, less at midtones).
-  // mix to 1.0 with uLumaLook so the slider's top removes the midweight
-  // cap entirely → max effect is fully consistent across L.
-  float midWeightBase = 0.5 + 0.5 * abs(L - 0.5) * 2.0;
-  float midWeight     = mix(midWeightBase, 1.0, uLumaLook);
-  float lookEff       = uLumaLook * midWeight;
-  if (expC > 1e-6 && lookEff > 1e-4){
-    float cellH = (origC > 1e-6) ? atan(b, a) : atan(expected.y, expected.x);
-    float expH  = atan(expected.y, expected.x);
-    float dh    = expH - cellH;
-    if (dh >  3.14159265) dh -= 6.28318531;
-    if (dh < -3.14159265) dh += 6.28318531;
-    float newH = cellH + lookEff * dh;
-    // Chroma boost: never below origC, can climb toward expC.
-    float boostedC = max(origC, expC);
-    float newC     = mix(origC, boostedC, lookEff);
-    a = newC * cos(newH);
-    b = newC * sin(newH);
-  }
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
@@ -1236,15 +1268,24 @@ void main(){
   }
 
   // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma.
-  // Hue gate: each anchor's weight is multiplied by max(0, cos(hueAngle))
-  // between cell and anchor. Anchors in the opposite hue hemisphere (>90°
-  // from cell) are excluded — prevents the brown/green-mush hue flips like
-  // "purple input → green-ish output" when palette anchors balance across
-  // opposing hues. Greys (cell or anchor C ≈ 0) bypass the gate (no hue).
+  // The "gate direction" used for the hue hemisphere test blends from the
+  // cell's own (a, b) at lumaLook=0 to the palette's L-conditional curve
+  // direction at lumaLook=1. So at high lumaLook the gate follows the
+  // light/dark ramp (cool shadows / warm highlights for teal-orange) and
+  // doesn't accidentally exclude the cool anchors when the input pixel
+  // happens to be warm at a cool-L position.
+  //
+  //   (a) Soft hue gate vs gateDir — smoothstep around 0 (no hard cliff at
+  //       exactly 90°) so anchors near the hemisphere boundary fade smoothly.
+  //   (b) Luma-look alignment bonus — anchors aligned with the curve get
+  //       boosted weight; anchors pointing away get suppressed. Palette
+  //       still drives the output; luma look just biases which anchors
+  //       carry weight at each L. Influence, not override.
+  vec2 gateDir = mix(vec2(a, b), expected, uLumaLook);
+  float gateC2 = gateDir.x*gateDir.x + gateDir.y*gateDir.y;
   float sumW   = 1e-12;
   vec3  sumLab = vec3(0.0);
   float sumC   = 0.0;
-  float cellC2 = a*a + b*b;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -1254,11 +1295,17 @@ void main(){
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     float w  = pow(r2, -halfP) * s.w;
-    // Hue-hemisphere gate.
     float ancC2 = s.y*s.y + s.z*s.z;
-    if (cellC2 > 1e-6 && ancC2 > 1e-6){
-      float cos_dh = (a*s.y + b*s.z) / sqrt(cellC2 * ancC2);
-      w *= max(0.0, cos_dh);
+    // (a) Soft hue gate against blended cell/curve direction.
+    if (gateC2 > 1e-6 && ancC2 > 1e-6){
+      float cos_dh = (gateDir.x*s.y + gateDir.y*s.z) / sqrt(gateC2 * ancC2);
+      w *= smoothstep(-0.2, 0.2, cos_dh);
+    }
+    // (b) Luma-look alignment bonus toward the curve direction.
+    if (uLumaLook > 0.0 && expC > 1e-6 && ancC2 > 1e-6){
+      float dotE = (expected.x*s.y + expected.y*s.z) / (expC * sqrt(ancC2));
+      float bonus = 0.5 + 0.5 * dotE;
+      w *= mix(1.0, bonus, uLumaLook);
     }
     sumW   += w;
     sumLab += w * s.xyz;
@@ -2642,9 +2689,10 @@ function init(){
     'soft':      { lTol: 0.7, abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, smoothness: 2 },
     // Middle of the road.
     'balanced':  { lTol: 0.5, abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, smoothness: 2 },
-    // Sharp hue separation, wide L acceptance — palette carves crisp hue
-    // regions while image lightness flows through.
-    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.40, reach: 0.30, smoothness: 2 },
+    // Sharp hue separation, wide L acceptance, HIGH chroma passthrough so
+    // saturated inputs stay saturated — palette carves crisp hue regions
+    // and image chroma flows through unmuted.
+    'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, smoothness: 2 },
     // Hard: short gradients between palette hues. Max IDW exponent
     // (softness=12) + tight σ_ab give very narrow transition zones at
     // anchor boundaries — each palette region reads as a flat-ish band of
