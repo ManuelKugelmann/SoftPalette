@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:29:26Z">
+<meta name="build" content="2026-05-16T20:36:38Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:29:26Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:36:38Z</span>
   </div>
 </header>
 
@@ -378,7 +378,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div class="note" style="margin:6px 0 3px">LUT slice <span style="color:var(--txdd)">(a→, b↑) at L=<span id="vLutSliceL">0.50</span></span></div>
     <input type="range" id="lutSliceL" min="0" max="1" step="0.02" value="0.5" style="width:100%;margin-bottom:4px">
     <canvas id="lutSlicePreview" width="160" height="160" style="width:100%;max-width:160px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
-    <div class="note" style="margin:6px 0 3px">hues · raw IDW <span style="color:var(--txdd)">(no luma look · reach · cRange)</span></div>
+    <div class="note" style="margin:6px 0 3px">hues · raw IDW</div>
     <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
   </section>
 
@@ -1995,12 +1995,11 @@ function makeLandscapeImage(){
   return cv;
 }
 
-// Hue picker test image: HSV-style RGB hue map.
-// X axis = hue [0°, 360°). Y axis: top half = saturation ramp (white → pure
-// hue at S:0→1, V=1); bottom half = value ramp (pure hue → black at V:1→0,
-// S=1). Pure RGB primaries land on the horizontal midline.
-// Unlike an OkLCh max-chroma sweep, every column is a clean RGB gradient
-// with no gamut cliffs — useful as a "what does this palette do" reference.
+// Hue picker test image: OkLab-uniform hue × L map.
+// X axis = hue [0°, 360°). Y axis = L (top L=1, bottom L=0). Chroma tents
+// toward 0 at the L extremes so the top fades to white and the bottom to
+// black. Built in OkLab — each row has constant L → no bright centerline
+// stripe and no per-hue brightness bands from sRGB primary spikes.
 function makeHuePickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2009,43 +2008,22 @@ function makeHuePickerImage(){
   const img = ctx.createImageData(W, H);
   const data = img.data;
 
-  // HSV → RGB (sRGB byte values directly).
-  function hsvToRgb(h, s, v){
-    const c = v * s;
-    const hp = h / 60;
-    const x = c * (1 - Math.abs((hp % 2) - 1));
-    let r = 0, g = 0, b = 0;
-    if (hp < 1)      { r = c; g = x; }
-    else if (hp < 2) { r = x; g = c; }
-    else if (hp < 3) { g = c; b = x; }
-    else if (hp < 4) { g = x; b = c; }
-    else if (hp < 5) { r = x; b = c; }
-    else             { r = c; b = x; }
-    const m = v - c;
-    return [
-      Math.round((r + m) * 255),
-      Math.round((g + m) * 255),
-      Math.round((b + m) * 255),
-    ];
-  }
-
-  const half = H / 2;
+  const Cmax = 0.18;  // stays inside sRGB gamut for all hues across mid L
   for (let y = 0; y < H; y++){
-    let s, v;
-    if (y < half){           // top half: white → pure hue
-      s = y / (half - 1);    // 0 at top → 1 at midline
-      v = 1;
-    } else {                 // bottom half: pure hue → black
-      s = 1;
-      v = 1 - (y - half) / (H - 1 - half);  // 1 at midline → 0 at bottom
-    }
+    const L = 1 - y / (H - 1);
+    const cFade = 1 - Math.abs(2 * L - 1);
+    const C = Cmax * cFade;
     for (let x = 0; x < W; x++){
-      const h = (x / W) * 360;
-      const [r, g, b] = hsvToRgb(h, s, v);
+      const hRad = (x / W) * 2 * Math.PI;
+      const a = C * Math.cos(hRad), b = C * Math.sin(hRad);
+      const lin = oklabToLinearJS(L, a, b);
+      const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+      const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+      const bo = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
       const idx = (y * W + x) * 4;
-      data[idx]   = r;
-      data[idx+1] = g;
-      data[idx+2] = b;
+      data[idx]   = Math.round(r * 255);
+      data[idx+1] = Math.round(g * 255);
+      data[idx+2] = Math.round(bo * 255);
       data[idx+3] = 255;
     }
   }
@@ -2330,29 +2308,27 @@ let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
 function buildHuePreviewSrc(){
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   const buf = new Uint8ClampedArray(W * H * 4);
-  const half = H / 2;
-  function hsvToRgb(h, s, v){
-    const c = v * s, hp = h / 60;
-    const x = c * (1 - Math.abs((hp % 2) - 1));
-    let r = 0, g = 0, b = 0;
-    if (hp < 1)      { r = c; g = x; }
-    else if (hp < 2) { r = x; g = c; }
-    else if (hp < 3) { g = c; b = x; }
-    else if (hp < 4) { g = x; b = c; }
-    else if (hp < 5) { r = x; b = c; }
-    else             { r = c; b = x; }
-    const m = v - c;
-    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
-  }
+  // Built directly in OkLab so brightness is uniform across hues at each row.
+  // x → hue (0..360°); y → L (top=1, bottom=0). Chroma tents toward 0 at the
+  // L extremes so top fades to white and bottom to black, no bright centerline
+  // and no per-hue brightness stripes from sRGB gamut variation.
+  const Cmax = 0.18;  // stays inside sRGB gamut for all hues across mid L
   for (let y = 0; y < H; y++){
-    let s, v;
-    if (y < half){ s = y / (half - 1); v = 1; }
-    else         { s = 1; v = 1 - (y - half) / (H - 1 - half); }
+    const L = 1 - y / (H - 1);
+    const cFade = 1 - Math.abs(2 * L - 1);
+    const C = Cmax * cFade;
     for (let x = 0; x < W; x++){
-      const h = (x / W) * 360;
-      const [r, g, b] = hsvToRgb(h, s, v);
+      const hRad = (x / W) * 2 * Math.PI;
+      const a = C * Math.cos(hRad), b = C * Math.sin(hRad);
+      const lin = oklabToLinearJS(L, a, b);
+      const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+      const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+      const bo = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
       const i = (y * W + x) * 4;
-      buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
+      buf[i] = Math.round(r * 255);
+      buf[i+1] = Math.round(g * 255);
+      buf[i+2] = Math.round(bo * 255);
+      buf[i+3] = 255;
     }
   }
   return buf;
@@ -2545,6 +2521,9 @@ function renderIdwPreview(){
   ctx.putImageData(img, 0, 0);
   // Anchor markers: map each anchor to its position on the hue picker
   // representation. x ← hue (0..360°), y ← L (top = bright, bot = dark).
+  // Marker fill = the IDW result sampled at that pixel, so the dot blends
+  // with the rendered output beneath it. The anchor's intended sRGB is drawn
+  // as a thin ring around the fill so its true hue is still identifiable.
   for (const p of state.palette){
     const [rr, gg, bb] = hexToRgb(p.hex);
     const lab = rgbToOklab(rr, gg, bb);
@@ -2554,7 +2533,26 @@ function renderIdwPreview(){
     if (hueDeg < 0) hueDeg += 360;
     const x = (hueDeg / 360) * W;
     const y = (1 - lab[0]) * (H - 1);  // top=bright(L=1), bot=dark(L=0)
-    _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], 3.5);
+    const xi = Math.max(0, Math.min(W - 1, Math.round(x)));
+    const yi = Math.max(0, Math.min(H - 1, Math.round(y)));
+    const o = (yi * W + xi) * 4;
+    const fillR = dst[o], fillG = dst[o + 1], fillB = dst[o + 2];
+    const lin = oklabToLinearJS(lab[0], lab[1], lab[2]);
+    const ringR = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[0]))) * 255)));
+    const ringG = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[1]))) * 255)));
+    const ringB = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[2]))) * 255)));
+    ctx.beginPath();
+    ctx.arc(x, y, 4.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, 3.6, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${ringR},${ringG},${ringB})`;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${fillR},${fillG},${fillB})`;
+    ctx.fill();
   }
 }
 
@@ -2584,7 +2582,9 @@ function renderLutSlicePreview(){
   }
   ctx.putImageData(img, 0, 0);
   // Anchor markers — dot size shrinks with L distance from the slice so the
-  // user can see which anchors are most influential at this depth.
+  // user can see which anchors are most influential at this depth. Outer
+  // ring = anchor's true sRGB; inner fill = sampled IDW result at the marker
+  // pixel so the dot core blends with the rendered output beneath it.
   for (const p of state.palette){
     const [rr, gg, bb] = hexToRgb(p.hex);
     const lab = rgbToOklab(rr, gg, bb);
@@ -2593,9 +2593,27 @@ function renderLutSlicePreview(){
     const y = ((-lab[2] + LUT_AB_RANGE) / (2 * LUT_AB_RANGE)) * (H - 1);
     const dL = Math.abs(lab[0] - L);
     const r = Math.max(1.5, 4.5 - dL * 6);   // closer L → bigger marker
-    _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], r);
-    // Tiny inner dot at low chroma so the marker stays visible at the origin too.
-    if (C < 0.02) _drawAnchorDot(ctx, x, y, lab[0], lab[1], lab[2], 1.5);
+    const xi = Math.max(0, Math.min(W - 1, Math.round(x)));
+    const yi = Math.max(0, Math.min(H - 1, Math.round(y)));
+    const o = (yi * W + xi) * 4;
+    const fillR = dst[o], fillG = dst[o + 1], fillB = dst[o + 2];
+    const lin = oklabToLinearJS(lab[0], lab[1], lab[2]);
+    const ringR = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[0]))) * 255)));
+    const ringG = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[1]))) * 255)));
+    const ringB = Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[2]))) * 255)));
+    ctx.beginPath();
+    ctx.arc(x, y, r + 0.7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${ringR},${ringG},${ringB})`;
+    ctx.fill();
+    const ri = Math.max(0.7, r - 1.2);
+    ctx.beginPath();
+    ctx.arc(x, y, ri, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${fillR},${fillG},${fillB})`;
+    ctx.fill();
   }
 }
 
