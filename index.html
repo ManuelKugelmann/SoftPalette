@@ -710,9 +710,9 @@ function packSeeds(seeds){
 // preserving rescale, per-axis blend toward input cell L and C, rejection.
 function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach, lumaCurve, lumaLook){
   if (seeds.length === 0) return [L, a, b];
-  // Luma-look: hue-only rotation toward palette's L-conditional mean direction.
-  // Preserves cell's chroma magnitude. Gated by midWeight so midtones are
-  // less affected. Mirrors the shader exactly.
+  // Luma-look: hue rotation + chroma-up boost toward palette's L-conditional
+  // mean. midweight collapses to 1 at lumaLook=1 (max → uniform hue ramp).
+  // Mirrors the shader.
   if (lumaCurve && lumaLook > 0){
     const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
     const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
@@ -721,17 +721,20 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     const eb = lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t;
     const origC = Math.hypot(a, b);
     const expC  = Math.hypot(ea, eb);
-    const midWeight = 0.5 + 0.5 * Math.abs(L - 0.5) * 2;
-    const lookEff   = lumaLook * midWeight;
-    if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
-      const cellH = Math.atan2(b, a);
+    const midWeightBase = 0.5 + 0.5 * Math.abs(L - 0.5) * 2;
+    const midWeight     = midWeightBase + (1 - midWeightBase) * lumaLook;
+    const lookEff       = lumaLook * midWeight;
+    if (expC > 1e-6 && lookEff > 1e-4){
+      const cellH = origC > 1e-6 ? Math.atan2(b, a) : Math.atan2(eb, ea);
       const expH  = Math.atan2(eb, ea);
       let dh = expH - cellH;
       if (dh >  Math.PI) dh -= 2 * Math.PI;
       if (dh < -Math.PI) dh += 2 * Math.PI;
       const newH = cellH + lookEff * dh;
-      a = origC * Math.cos(newH);
-      b = origC * Math.sin(newH);
+      const boostedC = Math.max(origC, expC);
+      const newC     = origC + lookEff * (boostedC - origC);
+      a = newC * Math.cos(newH);
+      b = newC * Math.sin(newH);
     }
   }
   const invSL2 = 1 / (sigmaL * sigmaL);
@@ -1155,30 +1158,36 @@ void main(){
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
 
-  // Luma-look: rotate this cell's (a, b) direction toward the palette's
-  // L-conditional mean hue, KEEPING the cell's original chroma magnitude.
-  // The effect is gated by midWeight so shadows / highlights get the full
-  // tint shift while midtones get ~half. Direction rotation (vs. mix toward
-  // the curve point) means luma look never adds or removes saturation —
-  // it only re-aims hue along the palette's learned axis.
+  // Luma-look: rotate cell hue toward the palette's L-conditional mean hue,
+  // optionally boosting chroma toward the palette's expected magnitude. The
+  // strength is gated by midWeight so partial slider values mostly affect
+  // shadows/highlights, but at slider max the midweight collapses to 1 and
+  // every L gets the full rotation — producing a true lightness-based hue
+  // ramp (input hue erased, output hue purely from palette L profile).
+  // Chroma is boosted only UPWARD (max(orig, exp)) so luma look never
+  // desaturates; saturated inputs are unchanged, grey/low-C inputs gain
+  // tint at the palette's expected chroma.
   vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
   float origC   = length(vec2(a, b));
   float expC    = length(expected);
-  // Always at least 0.5 effect — midtones lose half intensity, extremes get
-  // the full slider value. Plateau-style ramp (range [0.5, 1.0]) so the user
-  // doesn't see a dead zone at L≈0.5.
-  float midWeight = 0.5 + 0.5 * abs(L - 0.5) * 2.0;
-  float lookEff   = uLumaLook * midWeight;
-  if (origC > 1e-6 && expC > 1e-6 && lookEff > 1e-4){
-    float cellH = atan(b, a);
+  // midWeight base curve = [0.5, 1.0] (plateau, less at midtones).
+  // mix to 1.0 with uLumaLook so the slider's top removes the midweight
+  // cap entirely → max effect is fully consistent across L.
+  float midWeightBase = 0.5 + 0.5 * abs(L - 0.5) * 2.0;
+  float midWeight     = mix(midWeightBase, 1.0, uLumaLook);
+  float lookEff       = uLumaLook * midWeight;
+  if (expC > 1e-6 && lookEff > 1e-4){
+    float cellH = (origC > 1e-6) ? atan(b, a) : atan(expected.y, expected.x);
     float expH  = atan(expected.y, expected.x);
     float dh    = expH - cellH;
-    // Shortest-arc wrap to [-π, π].
     if (dh >  3.14159265) dh -= 6.28318531;
     if (dh < -3.14159265) dh += 6.28318531;
     float newH = cellH + lookEff * dh;
-    a = origC * cos(newH);
-    b = origC * sin(newH);
+    // Chroma boost: never below origC, can climb toward expC.
+    float boostedC = max(origC, expC);
+    float newC     = mix(origC, boostedC, lookEff);
+    a = newC * cos(newH);
+    b = newC * sin(newH);
   }
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
@@ -2606,10 +2615,13 @@ function init(){
     // Sharp hue separation, wide L acceptance — palette carves crisp hue
     // regions while image lightness flows through.
     'vivid':     { lTol: 0.3, abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.40, reach: 0.30, smoothness: 2 },
-    // Hard / near-Voronoi snap: full IDW exponent, tight tolerances, anchor
-    // chroma exact (cRange=0), palette controls L too (lRange=0.5). One blur
-    // iter softens cell seams without melting the palette regions.
-    'hard':      { lTol: 0.25, abTol: 0.08, softness: 12.0, lRange: 0.5, cRange: 0.0, reach: 0.18, smoothness: 1 },
+    // Hard / near-Voronoi: high IDW exponent snaps each cell to its nearest
+    // anchor's hue direction. Image L preserved (lRange=1.0). Chroma keeps
+    // most of the input magnitude (cRange=0.6) so the output stays crisp
+    // AND saturated — the "hard" feel is from sharp hue boundaries between
+    // anchor regions, not from forcing every cell to the (often lower)
+    // anchor chroma. Wide reach + 2 blur iters keep it clean.
+    'hard':      { lTol: 0.30, abTol: 0.10, softness: 10.0, lRange: 1.0, cRange: 0.6, reach: 0.40, smoothness: 2 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
