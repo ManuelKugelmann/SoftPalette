@@ -256,6 +256,23 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button id="extractColors">extract from image</button>
       <button id="clearPalette">clear</button>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="extendPalette">
+      <span>auto-extend <span style="color:var(--txdd)">spread each anchor in L and C</span></span>
+    </label>
+    <div class="slider" id="extendGridWrap" style="margin-top:6px">
+      <div class="lbl"><span>grid <span style="color:var(--txdd)">entries per anchor</span></span><span class="v" id="vExtendGrid">3×3 = 9</span></div>
+      <input type="range" id="extendGrid" min="0" max="3" step="1" value="1">
+    </div>
+    <div class="slider" id="extendLSpreadWrap" style="margin-top:6px">
+      <div class="lbl"><span>L spread <span style="color:var(--txdd)">±L offset</span></span><span class="v" id="vExtendLSpread">0.10</span></div>
+      <input type="range" id="extendLSpread" min="0" max="0.5" step="0.01" value="0.10">
+    </div>
+    <div class="slider" id="extendCSpreadWrap" style="margin-top:6px">
+      <div class="lbl"><span>chroma spread <span style="color:var(--txdd)">±C offset</span></span><span class="v" id="vExtendCSpread">0.050</span></div>
+      <input type="range" id="extendCSpread" min="0" max="0.3" step="0.005" value="0.05">
+    </div>
+    <div class="note" id="extendStatus" style="margin-top:4px"></div>
   </section>
 
 </aside>
@@ -326,27 +343,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div class="row full">
       <button id="exportPng">⬇ png</button>
     </div>
-  </section>
-
-  <section class="card">
-    <h2>extend palette</h2>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-      <input type="checkbox" id="extendPalette">
-      <span>auto-extend <span style="color:var(--txdd)">spread each anchor in L and C</span></span>
-    </label>
-    <div class="slider" id="extendGridWrap" style="margin-top:8px">
-      <div class="lbl"><span>grid <span style="color:var(--txdd)">entries per anchor</span></span><span class="v" id="vExtendGrid">3×3 = 9</span></div>
-      <input type="range" id="extendGrid" min="0" max="3" step="1" value="1">
-    </div>
-    <div class="slider" id="extendLSpreadWrap" style="margin-top:6px">
-      <div class="lbl"><span>L spread <span style="color:var(--txdd)">±L offset</span></span><span class="v" id="vExtendLSpread">0.10</span></div>
-      <input type="range" id="extendLSpread" min="0" max="0.5" step="0.01" value="0.10">
-    </div>
-    <div class="slider" id="extendCSpreadWrap" style="margin-top:6px">
-      <div class="lbl"><span>chroma spread <span style="color:var(--txdd)">±C offset</span></span><span class="v" id="vExtendCSpread">0.050</span></div>
-      <input type="range" id="extendCSpread" min="0" max="0.3" step="0.005" value="0.05">
-    </div>
-    <div class="note" id="extendStatus" style="margin-top:6px"></div>
   </section>
 
   <section class="card">
