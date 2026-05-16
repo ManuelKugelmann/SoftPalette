@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T19:32:10Z">
+<meta name="build" content="2026-05-16T19:37:09Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:32:10Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:37:09Z</span>
   </div>
 </header>
 
@@ -364,8 +364,13 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   </section>
 
   <section class="card">
-    <h2>hues preview</h2>
+    <h2>previews</h2>
+    <div class="note" style="margin-bottom:3px">hues · full pipeline</div>
     <canvas id="huePreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
+    <div class="note" style="margin:6px 0 3px">hues · raw IDW <span style="color:var(--txdd)">(no luma look · reach · cRange)</span></div>
+    <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
+    <div class="note" style="margin:6px 0 3px">LUT slice at L=0.5 <span style="color:var(--txdd)">(a→, b↑)</span></div>
+    <canvas id="lutSlicePreview" width="140" height="140" style="width:100%;max-width:140px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
   </section>
 
   <section class="card">
@@ -2241,6 +2246,60 @@ function buildHuePreviewSrc(){
   return buf;
 }
 
+// Lab → display sRGB byte triple. Writes 3 channels at dst[o..o+2].
+function _writeLabToRGBA(dst, o, L, a, b){
+  const lin = oklabToLinearJS(L, a, b);
+  const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
+  const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
+  const bo = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+  dst[o]   = Math.round(r * 255);
+  dst[o+1] = Math.round(g * 255);
+  dst[o+2] = Math.round(bo * 255);
+  dst[o+3] = 255;
+}
+
+// Raw-IDW preview pass — Shepard IDW + soft hue gate + chroma-preserve only.
+// Skips luma look, rejection envelope, and cRange/lRange. Lets users see the
+// "bare" palette mapping versus the full pipeline.
+function rawIdwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
+  if (seeds.length === 0) return [L, a, b];
+  const invSL2 = 1 / (sigmaL * sigmaL);
+  const invSA2 = 1 / (sigmaAB * sigmaAB);
+  const halfP = softness * 0.5;
+  let dmin2 = Infinity;
+  for (const s of seeds){
+    const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
+    const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
+    if (d2 < dmin2) dmin2 = d2;
+  }
+  let sumW = 1e-12, sL = 0, sA = 0, sB = 0, sC = 0;
+  const cellC2 = a*a + b*b;
+  for (const s of seeds){
+    const dL = (L - s.L), dA = (a - s.a), dB = (b - s.b);
+    const d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
+    const r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
+    let w = Math.pow(r2, -halfP) * s.strength;
+    const ancC2 = s.a*s.a + s.b*s.b;
+    if (cellC2 > 1e-6 && ancC2 > 1e-6){
+      const cos_dh = (a*s.a + b*s.b) / Math.sqrt(cellC2 * ancC2);
+      const t0 = Math.max(0, Math.min(1, (cos_dh + 0.5) / 1.0));
+      w *= t0 * t0 * (3 - 2 * t0);
+    }
+    sumW += w;
+    sL += w * s.L; sA += w * s.a; sB += w * s.b;
+    sC += w * Math.hypot(s.a, s.b);
+  }
+  let Lo = sL / sumW, Ao = sA / sumW, Bo = sB / sumW;
+  const Cavg = sC / sumW, mag = Math.hypot(Ao, Bo);
+  if (mag > 1e-6){
+    const coh = Math.min(1, mag / Math.max(Cavg, 1e-6));
+    const target = mag + coh * (Cavg - mag);
+    Ao *= target / mag;
+    Bo *= target / mag;
+  }
+  return [Lo, Ao, Bo];
+}
+
 function renderHuePreview(){
   const cv = document.getElementById('huePreview');
   if (!cv) return;
@@ -2253,10 +2312,11 @@ function renderHuePreview(){
   if (seeds.length === 0){
     dst.set(_huePreviewSrc);
     ctx.putImageData(img, 0, 0);
+    renderIdwPreview();
+    renderLutSlicePreview();
     return;
   }
   const { lTol, abTol, softness, lRange, cRange, reach, lumaLook } = state.params;
-  // Recompute curve from real anchors only — mirrors the GPU build path.
   const realSeeds = seeds.filter(s => !s.synthetic);
   const lumaCurve = lumaLook > 0 ? computeLumaCurve(realSeeds.length ? realSeeds : seeds) : null;
   const src = _huePreviewSrc;
@@ -2264,14 +2324,58 @@ function renderHuePreview(){
     const o = i * 4;
     const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
     const [oL, oa, ob] = idwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness, lRange, cRange, reach, lumaCurve, lumaLook);
-    const lin = oklabToLinearJS(oL, oa, ob);
-    const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
-    const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
-    const b = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
-    dst[o]   = Math.round(r * 255);
-    dst[o+1] = Math.round(g * 255);
-    dst[o+2] = Math.round(b * 255);
-    dst[o+3] = 255;
+    _writeLabToRGBA(dst, o, oL, oa, ob);
+  }
+  ctx.putImageData(img, 0, 0);
+  renderIdwPreview();
+  renderLutSlicePreview();
+}
+
+function renderIdwPreview(){
+  const cv = document.getElementById('idwPreview');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
+  const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
+  const img = ctx.createImageData(W, H);
+  const dst = img.data;
+  const seeds = paletteSeeds();
+  if (seeds.length === 0){ dst.set(_huePreviewSrc); ctx.putImageData(img, 0, 0); return; }
+  const { lTol, abTol, softness } = state.params;
+  const src = _huePreviewSrc;
+  for (let i = 0; i < W * H; i++){
+    const o = i * 4;
+    const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
+    const [oL, oa, ob] = rawIdwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness);
+    _writeLabToRGBA(dst, o, oL, oa, ob);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// LUT slice preview: 2D plane at fixed L (default 0.5). x→a, y→b. Renders the
+// FULL pipeline output for each (a, b) at that L — shows how the algorithm
+// partitions the chroma plane into anchor regions at midtone.
+function renderLutSlicePreview(){
+  const cv = document.getElementById('lutSlicePreview');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const img = ctx.createImageData(W, H);
+  const dst = img.data;
+  const seeds = paletteSeeds();
+  if (seeds.length === 0){ ctx.putImageData(img, 0, 0); return; }
+  const par = state.params;
+  const real = seeds.filter(s => !s.synthetic);
+  const lumaCurve = par.lumaLook > 0 ? computeLumaCurve(real.length ? real : seeds) : null;
+  const L = 0.5;
+  for (let y = 0; y < H; y++){
+    // canvas y=0 at top → b=+R; canvas y=H-1 at bot → b=−R
+    const b = LUT_AB_RANGE - (y / (H - 1)) * 2 * LUT_AB_RANGE;
+    for (let x = 0; x < W; x++){
+      const a = -LUT_AB_RANGE + (x / (W - 1)) * 2 * LUT_AB_RANGE;
+      const [oL, oa, ob] = idwLab(L, a, b, seeds, par.lTol, par.abTol, par.softness, par.lRange, par.cRange, par.reach, lumaCurve, par.lumaLook);
+      _writeLabToRGBA(dst, (y * W + x) * 4, oL, oa, ob);
+    }
   }
   ctx.putImageData(img, 0, 0);
 }
