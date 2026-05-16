@@ -242,8 +242,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="nord" title="Nord — frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — vivid neon accents">dracula</button>
       <button data-preset="Quake256" title="Full canonical 256-entry Quake 1 palette (gfx/palette.lmp)">Quake256</button>
-      <button data-preset="FullQuake">FullQuake</button>
-      <button data-preset="SlimQuake" title="Reduced quake palette — near-duplicate hues collapsed">SlimQuake</button>
+      <button data-preset="Quake28"  title="28 representative entries — one max-chroma anchor per Quake hue bin + greys">Quake28</button>
+      <button data-preset="Quake15"  title="15 entries — Quake28 with near-duplicate hues collapsed">Quake15</button>
     </div>
   </section>
 
@@ -274,6 +274,57 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- RIGHT -->
 <aside class="right">
   <section class="card">
+    <h2>lut parameters</h2>
+    <div class="row full" style="margin-bottom:8px">
+      <button data-lutpreset="tint"     title="Gentle hue tint — wide tolerances, soft IDW, high passthrough">tint</button>
+      <button data-lutpreset="vivid"    title="Sharp hue, wide L — narrow chroma tolerance, vivid rainbow regions">vivid</button>
+      <button data-lutpreset="soft"     title="Smooth IDW blend, palette colors gently dominant">soft</button>
+      <button data-lutpreset="balanced" title="Middle of the road">balanced</button>
+      <button data-lutpreset="hard"     title="Near-Voronoi snap with blur softening boundaries">hard</button>
+    </div>
+    <div class="slider">
+      <div class="lbl"><span>lut size <span style="color:var(--txdd)">cube edge</span></span><span class="v" id="vLutSize">33³</span></div>
+      <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>L tolerance <span style="color:var(--txdd)">σ_L</span></span><span class="v" id="vLTol">0.50</span></div>
+      <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>chroma tolerance <span style="color:var(--txdd)">σ_ab</span></span><span class="v" id="vAbTol">0.20</span></div>
+      <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>softness <span style="color:var(--txdd)">low=hard nearest, high=mush</span></span><span class="v" id="vSoftness">9.0</span></div>
+      <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>L range <span style="color:var(--txdd)">0=snap, 1=keep image L</span></span><span class="v" id="vLRange">1.00</span></div>
+      <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image C</span></span><span class="v" id="vCRange">0.50</span></div>
+      <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">post-blur iters (each ~3% cube)</span></span><span class="v" id="vSmoothness">0</span></div>
+      <input type="range" id="smoothness" min="0" max="12" step="1" value="0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>lut strength <span style="color:var(--txdd)">blend with identity</span></span><span class="v" id="vLutStrength">100%</span></div>
+      <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
+    </div>
+    <div class="note" id="lutStatus" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card">
+    <h2>export</h2>
+    <div class="row full">
+      <button id="exportPng">⬇ png</button>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>extend palette</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="extendPalette">
@@ -292,55 +343,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="extendCSpread" min="0" max="0.3" step="0.005" value="0.05">
     </div>
     <div class="note" id="extendStatus" style="margin-top:6px"></div>
-  </section>
-
-  <section class="card">
-    <h2>lut parameters</h2>
-    <div class="row full" style="margin-bottom:8px">
-      <button data-lutpreset="soft">soft</button>
-      <button data-lutpreset="balanced">balanced</button>
-      <button data-lutpreset="hard">hard</button>
-    </div>
-    <div class="slider">
-      <div class="lbl"><span>lut size <span style="color:var(--txdd)">cube edge</span></span><span class="v" id="vLutSize">33³</span></div>
-      <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>L tolerance <span style="color:var(--txdd)">σ_L</span></span><span class="v" id="vLTol">0.50</span></div>
-      <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma tolerance <span style="color:var(--txdd)">σ_ab</span></span><span class="v" id="vAbTol">0.20</span></div>
-      <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>softness <span style="color:var(--txdd)">IDW power · 1=mush, 12=hard</span></span><span class="v" id="vSoftness">4.0</span></div>
-      <input type="range" id="softness" min="1" max="12" step="0.1" value="4.0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>L range <span style="color:var(--txdd)">0=snap, 1=keep image L</span></span><span class="v" id="vLRange">1.00</span></div>
-      <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image C</span></span><span class="v" id="vCRange">0.50</span></div>
-      <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">post-blur iters</span></span><span class="v" id="vSmoothness">0</span></div>
-      <input type="range" id="smoothness" min="0" max="6" step="1" value="0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>lut strength <span style="color:var(--txdd)">blend with identity</span></span><span class="v" id="vLutStrength">100%</span></div>
-      <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
-    </div>
-    <div class="note" id="lutStatus" style="margin-top:6px"></div>
-  </section>
-
-  <section class="card">
-    <h2>export</h2>
-    <div class="row full">
-      <button id="exportPng">⬇ png</button>
-    </div>
   </section>
 
   <section class="card">
@@ -383,14 +385,13 @@ const PRESETS = {
   'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
   // Dracula — vivid neon accents
   'dracula':     ['#ff79c6','#bd93f9','#8be9fd','#50fa7b','#f1fa8c','#ffb86c','#ff5555','#6272a4'],
-  // Quake 1 canonical 256-color palette: max-chroma per hue bin + scrag-green
-  // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries total.
-  'FullQuake':   ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
-  // Reduced quake: one representative per hue bin, near-duplicates collapsed.
-  // Drops the second scrag (#c7c337), the bright-yellow trio's redundants
-  // (#dfab27,#efcb1f), two of three dark greens, near-white cyan, second
-  // dark blue (#8b8bcb), and the mauve neutral (#9f7f97).
-  'SlimQuake':   ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
+  // Quake 1 hue-binned subset: max-chroma anchor per hue bin + scrag-green
+  // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries.
+  'Quake28':     ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
+  // Reduced from Quake28 — one representative per hue, near-duplicates dropped.
+  // Drops scrag #c7c337, yellow-orange redundants #dfab27/#efcb1f, two of three
+  // dark greens, near-white cyan, second dark blue #8b8bcb, mauve #9f7f97.
+  'Quake15':     ['#231313','#ff0000','#cf632b','#e3974f','#fff31b','#e7e357','#233327','#6f837b','#abe7ff','#7fbfff','#0000ff','#2b2baf','#bb739f','#975777','#7b7b7b'],
   // Full 256-entry canonical Quake 1 palette (gfx/palette.lmp, byte-exact).
   // Indices 0-15 greys, 16-31 brown ramp, 32-47 dusk-blue ramp, 48-63 olive,
   // 64-79 red ramp, 80-95 amber, 96-111 fire (yellow-orange-red), 112-127 tan,
@@ -1969,8 +1970,8 @@ function updateExtendStatus(){
 // chip → native color picker. Right-click → remove (real chips only).
 // Synthetic chips (auto-extend) get a dashed border + slight transparency and
 // are read-only. Hex appears on hover via `title`.
-const HUE_BINS = 16;
-const HUE_NEUTRAL_C = 0.02;  // chroma below this → "neutrals" bucket
+const HUE_BINS = 24;          // 15° per bin — separates similar-but-distinct hues
+const HUE_NEUTRAL_C = 0.02;   // chroma below this → "neutrals" bucket
 
 function _seedToHex(L, a, b){
   const lin = oklabToLinearJS(L, a, b);
@@ -2229,25 +2230,52 @@ function init(){
   }
   bindLutSlider('lTol',     'vLTol',     'lTol',     v => v.toFixed(2));
   bindLutSlider('abTol',    'vAbTol',    'abTol',    v => v.toFixed(3));
-  bindLutSlider('softness',   'vSoftness',   'softness',   v => v.toFixed(1));
+  // Softness slider is inverted vs. its internal IDW exponent: slider position
+  // = 13 − exponent. So high slider = mushy/soft, low = hard nearest. Keeps the
+  // intuition "softness 12 means very soft" while the math stays sensible.
+  (function bindSoftnessSlider(){
+    const inp = document.getElementById('softness');
+    const lbl = document.getElementById('vSoftness');
+    const sync = () => {
+      const slider = 13 - state.params.softness;
+      inp.value = slider.toFixed(1);
+      lbl.textContent = slider.toFixed(1);
+    };
+    sync();
+    inp.addEventListener('input', () => {
+      const slider = parseFloat(inp.value);
+      state.params.softness = 13 - slider;
+      lbl.textContent = slider.toFixed(1);
+      scheduleLutRebuild();
+    });
+  })();
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
   bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
 
   // LUT param presets — three named operating points along the soft/hard axis.
+  // Presets carry softness as the internal IDW exponent (1=mushy, 12=hard).
+  // The softness slider displays the inverted position so high = soft.
   const lutPresets = {
+    // Tint: wide ellipsoids + softest IDW. Each anchor barely pulls. With
+    // lRange=1 the image's lightness is untouched and cRange=0.7 keeps most
+    // of its chroma — the palette acts as a gentle hue tint over the photo.
+    'tint':     { lTol: 1.0, abTol: 0.30,  softness: 1.0, lRange: 1.0, cRange: 0.70, smoothness: 0 },
+    // Vivid: very narrow chroma tolerance + wide L tolerance + soft IDW.
+    // Anchors carve crisp hue regions while accepting a wide L range, so the
+    // image's lightness flows through and chroma snaps toward palette directions.
+    'vivid':    { lTol: 0.3, abTol: 0.020, softness: 2.0, lRange: 1.0, cRange: 0.29, smoothness: 0 },
     // Soft: low IDW power produces inherent smoothing, no extra blur needed.
     // High L/C range — image's structure flows through, palette just tints.
-    'soft':     { lTol: 0.7, abTol: 0.30, softness: 2.0, lRange: 1.0, cRange: 0.7, smoothness: 0 },
-    'balanced': { lTol: 0.5, abTol: 0.20, softness: 4.0, lRange: 1.0, cRange: 0.5, smoothness: 0 },
+    'soft':     { lTol: 0.7, abTol: 0.30,  softness: 2.0, lRange: 1.0, cRange: 0.7,  smoothness: 0 },
+    'balanced': { lTol: 0.5, abTol: 0.20,  softness: 4.0, lRange: 1.0, cRange: 0.5,  smoothness: 0 },
     // Hard: near-Voronoi snap, 2 blur iters soften boundaries. Lower cRange
     // so anchors carry more chroma authority — vivid palette regions.
-    'hard':     { lTol: 0.3, abTol: 0.10, softness: 6.0, lRange: 0.8, cRange: 0.3, smoothness: 2 },
+    'hard':     { lTol: 0.3, abTol: 0.10,  softness: 6.0, lRange: 0.8, cRange: 0.3,  smoothness: 2 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
     abTol:      ['abTol',      'vAbTol',      v => v.toFixed(3)],
-    softness:   ['softness',   'vSoftness',   v => v.toFixed(1)],
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     cRange:     ['cRange',     'vCRange',     v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
@@ -2260,6 +2288,10 @@ function init(){
       document.getElementById(inp).value = state.params[k];
       document.getElementById(lbl).textContent = fmt(state.params[k]);
     }
+    // Softness: invert (slider position = 13 − IDW exponent).
+    const sftSlider = 13 - state.params.softness;
+    document.getElementById('softness').value = sftSlider.toFixed(1);
+    document.getElementById('vSoftness').textContent = sftSlider.toFixed(1);
     scheduleLutRebuild();
   }
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
