@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T19:42:22Z">
+<meta name="build" content="2026-05-16T19:57:34Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:42:22Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T19:57:34Z</span>
   </div>
 </header>
 
@@ -268,17 +268,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="checkbox" id="extendPalette">
       <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
-    <div class="slider" id="extendLWrap" style="margin-top:8px">
-      <div class="lbl"><span>L gap <span style="color:var(--txdd)">min Δ</span></span><span class="v" id="vExtendL">0.10</span></div>
-      <input type="range" id="extendL" min="0" max="0.3" step="0.01" value="0.10">
-    </div>
-    <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>C gap <span style="color:var(--txdd)">min ΔC</span></span><span class="v" id="vExtendC">0.05</span></div>
-      <input type="range" id="extendC" min="0" max="0.2" step="0.005" value="0.05">
-    </div>
-    <div class="slider" id="extendHWrap" style="margin-top:6px">
+    <div class="slider" id="extendHWrap" style="margin-top:8px">
       <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad</span></span><span class="v" id="vExtendH">0.50</span></div>
       <input type="range" id="extendH" min="0" max="1.57" step="0.05" value="0.50">
+    </div>
+    <div class="slider" id="extendCWrap" style="margin-top:6px">
+      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendC">8</span></div>
+      <input type="range" id="extendC" min="0" max="32" step="1" value="8">
+    </div>
+    <div class="slider" id="extendLWrap" style="margin-top:6px">
+      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 32 = full range</span></span><span class="v" id="vExtendL">8</span></div>
+      <input type="range" id="extendL" min="0" max="32" step="1" value="8">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
   </section>
@@ -512,14 +512,17 @@ const state = {
                          // urates — palette has no good answer for that cell.
     smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
-    // Auto-extend: three independent per-axis gap fillers. Each threshold is
-    // the minimum gap in that axis that triggers an insert. Slider == 0 disables
-    // the axis. Number of inserts per gap = floor(gap / threshold), so smaller
-    // threshold → denser fill. Total seeds capped at MAX_PAL.
+    // Auto-extend: three sequential passes — hue gaps, then chroma steps,
+    // then L steps. extendH is a gap threshold (rad); extendC / extendL are
+    // step COUNTS (≤ 32). With slider at N, each anchor walks N times in
+    // each direction with step = axis_range / N, so N=32 covers the full
+    // range. Collision rule on each step: hitting a REAL anchor stops that
+    // direction (real takes precedence); hitting a SYNTHETIC anchor
+    // averages the candidate into it (smooths overlapping contributions).
     extendPalette: false,
-    extendL:       0.10, // L axis gap threshold (0..0.3); insert midpoint anchors
-    extendC:       0.05, // chroma axis gap threshold (0..0.2); per-anchor walk
-    extendH:       0.50, // hue ring gap threshold (radians, 0..π/2); insert at midpoints
+    extendH:       0.50, // hue ring gap threshold (radians, 0..π/2)
+    extendC:       8,    // chroma walk step count per anchor (0 = off, 32 = full)
+    extendL:       8,    // L walk step count per anchor (0 = off, 32 = full)
   },
   gl: null, vao: null, programs: {},
   // ext_color_buffer_float availability — set in initGL
@@ -649,50 +652,8 @@ function paletteSeeds(){
     return [origC * Math.cos(newH), origC * Math.sin(newH)];
   }
 
-  // --- L gap fill: midpoint anchors between L-adjacent real seeds. The
-  // synth's interpolated (a, b) is then hue-rotated toward the lumaCurve
-  // direction at its new L — so an L-spread anchor naturally follows the
-  // palette's cool-shadow / warm-highlight tendency.
-  if (par.extendL > 0 && real.length >= 2){
-    const sorted = real.slice().sort((x, y) => x.L - y.L);
-    for (let i = 0; i < sorted.length - 1; i++){
-      if (out.length >= MAX_PAL) break;
-      const a = sorted[i], b = sorted[i + 1];
-      const gap = b.L - a.L;
-      if (gap <= par.extendL) continue;
-      const nNew = Math.floor(gap / par.extendL);
-      for (let k = 1; k <= nNew && out.length < MAX_PAL; k++){
-        const t = k / (nNew + 1);
-        const newL = a.L + t * (b.L - a.L);
-        let newA = a.a + t * (b.a - a.a);
-        let newB = a.b + t * (b.b - a.b);
-        [newA, newB] = tintByCurve(newL, newA, newB);
-        out.push({L: newL, a: newA, b: newB, strength: 1.0, synthetic: true});
-      }
-    }
-  }
-
-  // --- C gap fill: per anchor, walk chroma in both directions until a near
-  // neighbor (collision) or the (a,b) bounds. Greys are skipped (no hue dir).
-  if (par.extendC > 0){
-    for (const s of real){
-      if (out.length >= MAX_PAL) break;
-      const C0 = Math.hypot(s.a, s.b);
-      if (C0 < 1e-3) continue;
-      const hx = s.a / C0, hy = s.b / C0;
-      for (const dir of [+1, -1]){
-        for (let step = 1; step <= 10 && out.length < MAX_PAL; step++){
-          const newC = C0 + dir * step * par.extendC;
-          if (newC < 0 || newC > LUT_AB_RANGE) break;
-          const cand = { L: s.L, a: hx * newC, b: hy * newC, strength: 1.0, synthetic: true };
-          if (collides(cand, par.extendC * 0.5)) break;
-          out.push(cand);
-        }
-      }
-    }
-  }
-
-  // --- H gap fill: hue ring midpoints between chromatic seed neighbors ---
+  // Pass order — H first, then C, then L (per user spec).
+  // ----- 1. Hue gaps: insert midpoint anchors on the hue ring -----
   if (par.extendH > 0){
     const HUE_C_MIN = 0.02;
     const chromatic = real.filter(s => Math.hypot(s.a, s.b) >= HUE_C_MIN);
@@ -709,7 +670,7 @@ function paletteSeeds(){
         if (out.length >= MAX_PAL) break;
         const a = ring[i], b = ring[(i + 1) % ring.length];
         let gap = b.hRing - a.hRing;
-        if (gap <= 0) gap += TWO_PI;  // wraparound segment
+        if (gap <= 0) gap += TWO_PI;
         if (gap <= par.extendH) continue;
         const nNew = Math.floor(gap / par.extendH);
         for (let k = 1; k <= nNew && out.length < MAX_PAL; k++){
@@ -727,6 +688,92 @@ function paletteSeeds(){
         }
       }
     }
+  }
+
+  // Walking step extension on a per-anchor axis (used by C and L below).
+  //   stepCount = how many steps in each direction (slider value, 0 = off)
+  //   stepSize  = axis range / stepCount  (so stepCount=32 covers the full axis)
+  //   stepFn(s, dir, i) → returns the candidate {L, a, b} for anchor s,
+  //                       direction dir ∈ {-1, +1}, step index i ≥ 1.
+  //                       Returns null when the candidate falls outside the
+  //                       valid axis range (stops the walk).
+  //   tol       = collision radius in Lab.
+  //
+  // Behaviour:
+  //   - If no nearby anchor exists at candidate position → insert a new synth.
+  //   - If a REAL anchor sits there → stop walking in this direction (real
+  //     anchors take precedence; the existing palette anchor terminates the
+  //     extension chain).
+  //   - If a SYNTHETIC anchor sits there → average it with the candidate
+  //     (smooths overlapping contributions from different anchors).
+  function walkAxis(stepCount, stepFn, tol){
+    if (stepCount <= 0) return;
+    // Snapshot of anchors at the start of this pass — extensions only walk
+    // FROM real anchors (not from synths added by H pass), avoiding compound
+    // growth where synths spawn new synths in unexpected directions.
+    const sources = out.filter(s => !s.synthetic);
+    for (const s of sources){
+      if (out.length >= MAX_PAL) break;
+      for (const dir of [+1, -1]){
+        for (let i = 1; i <= stepCount; i++){
+          if (out.length >= MAX_PAL) break;
+          const cand = stepFn(s, dir, i);
+          if (!cand) break;  // out of axis range — stop direction
+          // Find any existing anchor within tol of the candidate position.
+          let foundIdx = -1;
+          for (let j = 0; j < out.length; j++){
+            const o = out[j];
+            if (Math.abs(o.L - cand.L) < tol &&
+                Math.hypot(o.a - cand.a, o.b - cand.b) < tol){
+              foundIdx = j; break;
+            }
+          }
+          if (foundIdx < 0){
+            out.push({L: cand.L, a: cand.a, b: cand.b, strength: 1.0, synthetic: true});
+          } else if (out[foundIdx].synthetic){
+            // Average synthetic with candidate (in place).
+            const o = out[foundIdx];
+            o.L = 0.5 * (o.L + cand.L);
+            o.a = 0.5 * (o.a + cand.a);
+            o.b = 0.5 * (o.b + cand.b);
+          } else {
+            // Real anchor — stops this direction.
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // ----- 2. Chroma steps: walk each anchor's chroma in both directions -----
+  if (par.extendC > 0){
+    const N = Math.max(1, Math.round(par.extendC));
+    const stepC = LUT_AB_RANGE / N;
+    const tolC  = stepC * 0.5;
+    walkAxis(N, (s, dir, i) => {
+      const C0 = Math.hypot(s.a, s.b);
+      if (C0 < 1e-3) return null;     // grey: no hue direction to walk along
+      const newC = C0 + dir * i * stepC;
+      if (newC < 0 || newC > LUT_AB_RANGE) return null;
+      const k = newC / C0;
+      return { L: s.L, a: s.a * k, b: s.b * k };
+    }, tolC);
+  }
+
+  // ----- 3. Lightness steps: walk each anchor's L in both directions -----
+  if (par.extendL > 0){
+    const N = Math.max(1, Math.round(par.extendL));
+    const stepL = 1.0 / N;
+    const tolL  = stepL * 0.5;
+    walkAxis(N, (s, dir, i) => {
+      const newL = s.L + dir * i * stepL;
+      if (newL < 0 || newL > 1) return null;
+      // Hue-rotate toward the palette's L-conditional direction at newL,
+      // scaled by lumaLook (so extending an anchor follows the cinematic
+      // ramp). Preserves the anchor's chroma magnitude.
+      const [aT, bT] = tintByCurve(newL, s.a, s.b);
+      return { L: newL, a: aT, b: bT };
+    }, tolL);
   }
 
   // --- Whitepoint / blackpoint extension: if the palette doesn't reach near
@@ -2993,9 +3040,9 @@ function init(){
       scheduleLutRebuild();
     });
   }
-  bindExtendAxis('extendL', 'vExtendL', 'extendL', v => v.toFixed(2));
-  bindExtendAxis('extendC', 'vExtendC', 'extendC', v => v.toFixed(3));
   bindExtendAxis('extendH', 'vExtendH', 'extendH', v => v.toFixed(2));
+  bindExtendAxis('extendC', 'vExtendC', 'extendC', v => v.toFixed(0));
+  bindExtendAxis('extendL', 'vExtendL', 'extendL', v => v.toFixed(0));
 
   // Split: drag anywhere on the canvas to move the split line.
   // - `touch-action:none` on canvasWrap (CSS) prevents native pan/zoom from
