@@ -2129,11 +2129,8 @@ function updateExtendStatus(){
 // chip → native color picker. Right-click → remove (real chips only).
 // Synthetic chips (auto-extend) get a dashed border + slight transparency and
 // are read-only. Hex appears on hover via `title`.
-const HUE_BINS = 24;          // 15° per bin — separates similar-but-distinct hues
+const HUE_BINS = 16;          // 22.5° per bin
 const HUE_NEUTRAL_C = 0.02;   // chroma below this → "neutrals" bucket
-// Chroma sub-bucketing per hue row: chips of the same hue but different
-// saturation get separate palette rows. Thresholds are in OkLab chroma units.
-const CHROMA_BIN_THRESHOLDS = [0.10, 0.20];  // → 3 bins: low / mid / high
 
 function _seedToHex(L, a, b){
   const lin = oklabToLinearJS(L, a, b);
@@ -2158,54 +2155,26 @@ function renderSwatches(){
     entries.push({hex: _seedToHex(s.L, s.a, s.b), L: s.L, a: s.a, b: s.b, idx: -1, synth: true});
   }
 
-  // Bucket by (hue, chroma): HUE_BINS hue bins × (CHROMA_BIN_THRESHOLDS+1)
-  // chroma sub-bins, plus 1 neutrals row at the bottom. Chips of the same hue
-  // but different saturation get separate rows. Within a row, sort by L.
-  const NCB = CHROMA_BIN_THRESHOLDS.length + 1;  // chroma sub-bins per hue
-  function chromaBin(C){
-    for (let i = 0; i < CHROMA_BIN_THRESHOLDS.length; i++){
-      if (C < CHROMA_BIN_THRESHOLDS[i]) return i;
-    }
-    return CHROMA_BIN_THRESHOLDS.length;
-  }
-  const NCH = HUE_BINS * NCB;
-  const buckets = Array.from({length: NCH + 1}, () => []);  // +1 = neutrals
+  // Bucket by hue only — chroma variation within a hue (typical "desat by
+  // lightness" where dark/bright variants naturally carry less chroma) should
+  // stay on the SAME row, not split into different rows. Sort within each row
+  // by L so a hue's ramp reads dark → bright left to right. Neutrals (low C
+  // anchors with ambiguous hue) get their own row at the bottom.
+  const buckets = Array.from({length: HUE_BINS + 1}, () => []);
   for (const e of entries){
     const C = Math.hypot(e.a, e.b);
-    if (C < HUE_NEUTRAL_C){ buckets[NCH].push(e); continue; }
+    if (C < HUE_NEUTRAL_C){ buckets[HUE_BINS].push(e); continue; }
     const h = (Math.atan2(e.b, e.a) + Math.PI) / (2 * Math.PI);
     const hb = Math.min(HUE_BINS - 1, Math.floor(h * HUE_BINS));
-    const cb = chromaBin(C);
-    // Order: low-C rows first within each hue, so saturation rises downward.
-    buckets[hb * NCB + cb].push(e);
+    buckets[hb].push(e);
   }
   for (const bk of buckets) bk.sort((x, y) => x.L - y.L);
 
-  // Render: outer loop hue, inner loop chroma, then neutrals.
-  for (let hb = 0; hb < HUE_BINS; hb++){
-    for (let cb = 0; cb < NCB; cb++){
-      const bk = buckets[hb * NCB + cb];
-      if (bk.length === 0) continue;
-      const row = document.createElement('div');
-      row.className = 'palrow';
-      for (const e of bk){
-        const el = document.createElement('div');
-        el.className = e.synth ? 'swatch synth' : 'swatch';
-        el.style.background = e.hex;
-        el.title = e.hex.toUpperCase() + (e.synth ? ' (synth)' : '');
-        if (!e.synth){
-          el.innerHTML = `<input type="color" value="${e.hex}" data-i="${e.idx}">`;
-        }
-        row.appendChild(el);
-      }
-      root.appendChild(row);
-    }
-  }
-  const neutrals = buckets[NCH];
-  if (neutrals.length){
+  for (const bk of buckets){
+    if (bk.length === 0) continue;
     const row = document.createElement('div');
     row.className = 'palrow';
-    for (const e of neutrals){
+    for (const e of bk){
       const el = document.createElement('div');
       el.className = e.synth ? 'swatch synth' : 'swatch';
       el.style.background = e.hex;
