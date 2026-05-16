@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T20:36:38Z">
+<meta name="build" content="2026-05-16T20:42:37Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:36:38Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T20:42:37Z</span>
   </div>
 </header>
 
@@ -578,6 +578,56 @@ function hexToRgb(hex){
 function rgbToHex(r,g,b){
   const f = v => Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,'0');
   return '#'+f(r)+f(g)+f(b);
+}
+
+// HPLuv → sRGB byte triple. h in [0,360), s & l in [0,100]. HPLuv keeps the
+// chroma at each L identical across all hues (the smallest in-gamut chroma
+// for the L slice), so a hue × L sweep at s=100 yields a clean cylinder with
+// no per-hue brightness or chroma banding. Reference: https://www.hsluv.org.
+function hpluvToRgb(h, s, l){
+  if (l > 99.9999999) return [255, 255, 255];
+  if (l < 1e-8)       return [0, 0, 0];
+  // XYZ_D65 → linear sRGB matrix (rows).
+  const m00 =  3.240969941904521, m01 = -1.537383177570093, m02 = -0.498610760293;
+  const m10 = -0.96924363628087,  m11 =  1.87596750150772,  m12 =  0.041555057407;
+  const m20 =  0.055630079696993, m21 = -0.20397695888897,  m22 =  1.056971514242878;
+  const kappa = 903.2962962962963;
+  const sub1 = Math.pow(l + 16, 3) / 1560896;
+  const sub2 = sub1 > 0.008856451679035631 ? sub1 : l / kappa;
+  // Max safe chroma = closest sRGB-gamut bounding line at this L (over 3
+  // channels × 2 limits {0,1}), computed analytically in (u*, v*) space.
+  let minD = Infinity;
+  const M = [[m00,m01,m02],[m10,m11,m12],[m20,m21,m22]];
+  for (let c = 0; c < 3; c++){
+    const r1 = M[c][0], r2 = M[c][1], r3 = M[c][2];
+    for (let t = 0; t < 2; t++){
+      const top1 = (284517 * r1 - 94839 * r3) * sub2;
+      const top2 = (838422 * r3 + 769860 * r2 + 731718 * r1) * l * sub2 - 769860 * t * l;
+      const bottom = (632260 * r3 - 126452 * r2) * sub2 + 126452 * t;
+      const slope = top1 / bottom;
+      const intercept = top2 / bottom;
+      const d = Math.abs(intercept) / Math.sqrt(slope * slope + 1);
+      if (d < minD) minD = d;
+    }
+  }
+  const C = minD * s / 100;
+  const hr = h * Math.PI / 180;
+  const u = C * Math.cos(hr), v = C * Math.sin(hr);
+  // LUV → XYZ (D65, Y in [0,1])
+  const refU = 0.19783000664283, refV = 0.46831999493879;
+  const varU = u / (13 * l) + refU;
+  const varV = v / (13 * l) + refV;
+  const Y = l > 8 ? Math.pow((l + 16) / 116, 3) : l / kappa;
+  const X = Y * 9 * varU / (4 * varV);
+  const Z = Y * (12 - 3 * varU - 20 * varV) / (4 * varV);
+  // XYZ → linear sRGB → gamma → byte clamp
+  const Rl = m00 * X + m01 * Y + m02 * Z;
+  const Gl = m10 * X + m11 * Y + m12 * Z;
+  const Bl = m20 * X + m21 * Y + m22 * Z;
+  const R = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Rl)))));
+  const G = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Gl)))));
+  const B = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, Bl)))));
+  return [Math.round(R * 255), Math.round(G * 255), Math.round(B * 255)];
 }
 
 function rgbToOklab(r,g,b){
@@ -1995,11 +2045,11 @@ function makeLandscapeImage(){
   return cv;
 }
 
-// Hue picker test image: OkLab-uniform hue × L map.
-// X axis = hue [0°, 360°). Y axis = L (top L=1, bottom L=0). Chroma tents
-// toward 0 at the L extremes so the top fades to white and the bottom to
-// black. Built in OkLab — each row has constant L → no bright centerline
-// stripe and no per-hue brightness bands from sRGB primary spikes.
+// Hue picker test image: HPLuv hue × L sweep at max safe saturation.
+// X axis = hue [0°, 360°). Y axis = L (top L=100, bottom L=0). HPLuv's
+// per-row chroma is the smallest in-gamut chroma across all hues at that L
+// → uniform brightness AND uniform chroma per row, no centerline stripe and
+// no per-hue chroma bands. L extremes naturally fade to white/black.
 function makeHuePickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2007,28 +2057,16 @@ function makeHuePickerImage(){
   const ctx = cv.getContext('2d');
   const img = ctx.createImageData(W, H);
   const data = img.data;
-
-  const Cmax = 0.18;  // stays inside sRGB gamut for all hues across mid L
   for (let y = 0; y < H; y++){
-    const L = 1 - y / (H - 1);
-    const cFade = 1 - Math.abs(2 * L - 1);
-    const C = Cmax * cFade;
+    const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
-      const hRad = (x / W) * 2 * Math.PI;
-      const a = C * Math.cos(hRad), b = C * Math.sin(hRad);
-      const lin = oklabToLinearJS(L, a, b);
-      const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
-      const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
-      const bo = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+      const h = (x / W) * 360;
+      const [r, g, b] = hpluvToRgb(h, 100, L);
       const idx = (y * W + x) * 4;
-      data[idx]   = Math.round(r * 255);
-      data[idx+1] = Math.round(g * 255);
-      data[idx+2] = Math.round(bo * 255);
-      data[idx+3] = 255;
+      data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
-
   return cv;
 }
 
@@ -2308,27 +2346,15 @@ let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
 function buildHuePreviewSrc(){
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   const buf = new Uint8ClampedArray(W * H * 4);
-  // Built directly in OkLab so brightness is uniform across hues at each row.
-  // x → hue (0..360°); y → L (top=1, bottom=0). Chroma tents toward 0 at the
-  // L extremes so top fades to white and bottom to black, no bright centerline
-  // and no per-hue brightness stripes from sRGB gamut variation.
-  const Cmax = 0.18;  // stays inside sRGB gamut for all hues across mid L
+  // HPLuv hue × L sweep — same generator as the main hue picker test image
+  // (uniform chroma across hues per row, white/black at L extremes).
   for (let y = 0; y < H; y++){
-    const L = 1 - y / (H - 1);
-    const cFade = 1 - Math.abs(2 * L - 1);
-    const C = Cmax * cFade;
+    const L = 100 * (1 - y / (H - 1));
     for (let x = 0; x < W; x++){
-      const hRad = (x / W) * 2 * Math.PI;
-      const a = C * Math.cos(hRad), b = C * Math.sin(hRad);
-      const lin = oklabToLinearJS(L, a, b);
-      const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
-      const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
-      const bo = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
+      const h = (x / W) * 360;
+      const [r, g, b] = hpluvToRgb(h, 100, L);
       const i = (y * W + x) * 4;
-      buf[i] = Math.round(r * 255);
-      buf[i+1] = Math.round(g * 255);
-      buf[i+2] = Math.round(bo * 255);
-      buf[i+3] = 255;
+      buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
   }
   return buf;
