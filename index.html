@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T07:16:46Z">
+<meta name="build" content="2026-05-17T07:37:23Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T07:16:46Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T07:37:23Z</span>
   </div>
 </header>
 
@@ -501,7 +501,7 @@ const state = {
     // palette's L-conditional mean hue before IDW. 0 = off, 1 = full shift to
     // L-mean. Captures the teal-orange-style "cool shadows, warm highlights"
     // automatically from the palette's L→(a,b) profile.
-    lumaLook: 0.0,
+    lumaLook: 0.25,
     // Diagnostic: which L slice the LUT-slice preview shows. 0 dark, 1 bright.
     lutSliceL: 0.5,
     // Per-axis blend back toward the input cell's own L/C — 0 snaps fully to
@@ -520,7 +520,7 @@ const state = {
     // Range 0 → hard snap to the nearest anchor's L / C respectively.
     lExt:   1.0,         // L envelope half-range (0 = hard snap to anchor L)
     cExt:   0.40,        // C envelope half-range (0 = hard snap to anchor C)
-    smoothness: 0,       // 0..6 post-build Gaussian blur iterations on the LUT
+    smoothness: 2,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
@@ -3530,7 +3530,7 @@ function init(){
     'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.35 },
     'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.25 },
     'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.10 },
-    'hard':      { lTol: 0.25, abTol: 0.05, softness: 12.0, lRange: 1.0, cRange: 0.60, reach: 0.40, lExt: 0.40, cExt: 0.18, smoothness: 1, lumaLook: 0.50 },
+    'hard':      { lTol: 0.20, abTol: 0.05, softness: 14.0, lRange: 1.0, cRange: 0.40, reach: 0.35, lExt: 0.30, cExt: 0.15, smoothness: 3, lumaLook: 0.40 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
