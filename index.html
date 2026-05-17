@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T15:43:43Z">
+<meta name="build" content="2026-05-17T15:45:04Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:43:43Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:45:04Z</span>
   </div>
 </header>
 
@@ -518,8 +518,8 @@ const state = {
     // final output chroma similarly clamped around the nearest anchor's C.
     // Range max = full axis range (1.0 for L, LUT_AB_RANGE for C) → noop.
     // Range 0 → hard snap to the nearest anchor's L / C respectively.
-    lExt:   1.0,         // L envelope half-range (0 = hard snap to anchor L)
-    cExt:   0.40,        // C envelope half-range (0 = hard snap to anchor C)
+    lExt:   0.70,        // L envelope half-range (0 = hard snap to anchor L)
+    cExt:   0.28,        // C envelope half-range (0 = hard snap to anchor C)
     smoothness: 2,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -3527,10 +3527,10 @@ function init(){
   // rings on the tight 'hard' preset, so cExt=0.06 / lExt=0.20 work again.
   const lutPresets = {
     'wash':      { lTol: 0.8,  abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
-    'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.35 },
-    'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.25 },
-    'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.10 },
-    'hard':      { lTol: 0.30, abTol: 0.10, softness: 8.0,  lRange: 1.0, cRange: 0.50, reach: 0.30, lExt: 0.60, cExt: 0.25, smoothness: 2, lumaLook: 0.30 },
+    'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 0.85, cExt: 0.32, smoothness: 2, lumaLook: 0.35 },
+    'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 0.70, cExt: 0.28, smoothness: 2, lumaLook: 0.25 },
+    'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 0.55, cExt: 0.25, smoothness: 2, lumaLook: 0.10 },
+    'hard':      { lTol: 0.40, abTol: 0.15, softness: 5.0,  lRange: 1.0, cRange: 0.55, reach: 0.28, lExt: 0.55, cExt: 0.22, smoothness: 2, lumaLook: 0.30 },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
