@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-16T22:48:37Z">
+<meta name="build" content="2026-05-17T06:40:43Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-16T22:48:37Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:40:43Z</span>
   </div>
 </header>
 
@@ -289,6 +289,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <button id="hueImage"       class="tab" title="Smoothed Okhsl picker (perceptual L, per-hue gamut max chroma)">hues</button>
     <button id="okhplImage"     class="tab" title="Ok-HPLuv-boost: uniform chroma across hues per row, smoother than Okhsl in the deep-blue region">ok-hpl+</button>
     <button id="hsvImage"       class="tab" title="Literal HSV cylinder — reference image with the band artifacts (bright yellow / dark blue) for comparison">hsv ref</button>
+    <button id="hsvEqImage"     class="tab" title="HSV with per-column y-stretch: centerline pinned at L≈0.5 per hue, so the bright-yellow / dark-blue bands are mostly equalized vertically">hsv y-eq</button>
     <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
     <button id="photoImage"     class="tab" title="Procedural still-life (apples on wood)">still-life</button>
     <button id="landscapeImage" class="tab" title="Procedural landscape — atmospheric depth, greens">landscape</button>
@@ -412,7 +413,7 @@ const PRESETS = {
   // (#1f4a3a) sits with the cool cluster; the amber (#d4a040) sits with the
   // warm cluster. The original green-teal #3ab088 has been darkened to
   // #2a8068 so it doesn't dominate the bright half.
-  'tealgreen-amberorange': ['#0a3a48','#1f4a3a','#1d5a66','#205a48','#f0c840','#d5832f','#c44a2e'],
+  'tealgreen-amberorange': ['#0a3a48','#1f4a3a','#1d5a66','#205a48','#fae060','#d5832f','#c44a2e'],
   'moebius':     ['#e6c8a0','#7ca6c8','#3a4a78','#c46a4a','#5a8a5a'],
   'ghibli':      ['#a8c8e0','#5e8a5e','#e8d8a0','#c46a4a','#2c4a5a'],
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
@@ -2416,9 +2417,10 @@ function _smoothHueRing(buf, W, H){
   const kernel = [1, 4, 6, 4, 1], ksum = 16;
   const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
   const toSrgb = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
-  // Two passes: a single 5-tap kernel left a visible step in the deep-blue
-  // region where Okhsl's compute_max_saturation polynomial handoff sits.
-  // Two passes effectively widen the kernel without enlarging it per pass.
+  // Three passes: a single 5-tap kernel left a visible step in the deep-blue
+  // region where Okhsl's compute_max_saturation polynomial handoff sits, and
+  // a smaller residual in pure-green. Three passes effectively widen the
+  // kernel without enlarging it per pass.
   function pass(src){
     const out = new Uint8ClampedArray(src.length);
     for (let y = 0; y < H; y++){
@@ -2441,7 +2443,7 @@ function _smoothHueRing(buf, W, H){
     }
     return out;
   }
-  return pass(pass(buf));
+  return pass(pass(pass(buf)));
 }
 function makeHuePickerImage(){
   const W = 720, H = 460;
@@ -2508,6 +2510,76 @@ function makeHsvReferenceImage(){
   return cv;
 }
 
+// HSV with per-column y stretch — same literal HSV math as 'hsv ref', but
+// each column's vertical axis is linearly remapped so that "pure hue at
+// s=v=1" (the centerline color) lands at canvas y = H/2 only if its OkLab
+// L = 0.5; otherwise the centerline is shifted up (warm hues with high L)
+// or down (cool hues with low L). Top still white, bottom still black; the
+// pure-hue band traces a sine-like curve that follows the gamut's L per
+// hue. Reduces the centerline brightness band by spreading bright hues'
+// rich pure colors away from the visual center.
+function makeHsvEqualizedImage(){
+  const W = 720, H = 460;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const data = img.data;
+  function hsvToRgb(h, s, v){
+    const c = v * s, hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1)      { r = c; g = x; }
+    else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; }
+    else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; }
+    else             { r = c; b = x; }
+    const m = v - c;
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  function pureL(h){
+    const [r, g, b] = hsvToRgb(h, 1, 1);
+    const toLin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const lr = toLin(r), lg = toLin(g), lb = toLin(b);
+    let L = 0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb;
+    let M = 0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb;
+    let S = 0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb;
+    L = Math.cbrt(L); M = Math.cbrt(M); S = Math.cbrt(S);
+    return 0.2104542553 * L + 0.7936177850 * M - 0.0040720468 * S;
+  }
+  const half = (H - 1) * 0.5;
+  for (let x = 0; x < W; x++){
+    const h  = (x / W) * 360;
+    const pL = pureL(h);
+    // y_in_pivot: the original-HSV row where OkLab L is ≈0.5, linearly
+    // interpolated through HSV's two-segment L profile (1 → pL on top half,
+    // pL → 0 on bottom half).
+    let yPivot;
+    if (pL >= 0.5){
+      yPivot = half + (pL - 0.5) / Math.max(pL, 1e-6) * half;
+    } else {
+      yPivot = (0.5) / Math.max(1 - pL, 1e-6) * half;
+    }
+    for (let y = 0; y < H; y++){
+      let yIn;
+      if (y <= half){
+        yIn = (y / half) * yPivot;
+      } else {
+        yIn = yPivot + ((y - half) / half) * ((H - 1) - yPivot);
+      }
+      let s, v;
+      if (yIn < half){ s = yIn / half; v = 1; }
+      else           { s = 1; v = 1 - (yIn - half) / ((H - 1) - half); }
+      const [r, g, b] = hsvToRgb(h, s, v);
+      const idx = (y * W + x) * 4;
+      data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 // Ok-HPLuv-boost picker: uniform chroma per L in OkLab (smallest in-gamut
 // chroma across hues at this L) scaled by boost. Trades a little vividness
 // for true cross-hue uniformity; no Okhsl per-hue cusp polynomial branches,
@@ -2523,7 +2595,7 @@ function makeOkhplPickerImage(){
     const l = 1 - y / (H - 1);
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = okhplBoostedToRgb(h, 1, l, 1.6);
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, 2.0);
       const idx = (y * W + x) * 4;
       raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
     }
@@ -2685,6 +2757,9 @@ function loadHueImage(){
 }
 function loadHsvRefImage(){
   installCanvas(makeHsvReferenceImage(), 'synthetic · hsv reference');
+}
+function loadHsvEqImage(){
+  installCanvas(makeHsvEqualizedImage(), 'synthetic · hsv·y-equalized');
 }
 function loadOkhplImage(){
   installCanvas(makeOkhplPickerImage(), 'synthetic · ok-hpluv·boost');
@@ -3436,6 +3511,7 @@ function init(){
   bindImageBtn('hueImage',       loadHueImage);
   bindImageBtn('okhplImage',     loadOkhplImage);
   bindImageBtn('hsvImage',       loadHsvRefImage);
+  bindImageBtn('hsvEqImage',     loadHsvEqImage);
   bindImageBtn('photoImage',     loadPhotoImage);
   bindImageBtn('portraitImage',  loadPortraitImage);
   bindImageBtn('landscapeImage', loadLandscapeImage);
