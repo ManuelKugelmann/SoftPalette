@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T06:40:43Z">
+<meta name="build" content="2026-05-17T06:47:16Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:40:43Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:47:16Z</span>
   </div>
 </header>
 
@@ -288,6 +288,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <div id="imageTabs" class="tabs">
     <button id="hueImage"       class="tab" title="Smoothed Okhsl picker (perceptual L, per-hue gamut max chroma)">hues</button>
     <button id="okhplImage"     class="tab" title="Ok-HPLuv-boost: uniform chroma across hues per row, smoother than Okhsl in the deep-blue region">ok-hpl+</button>
+    <button id="okhplBrightImage" class="tab" title="Ok-HPLuv-boost variant with the chroma peak ~20% from top — most of the image stays saturated, white→saturated compressed to a thin top band">ok-hpl bright</button>
     <button id="hsvImage"       class="tab" title="Literal HSV cylinder — reference image with the band artifacts (bright yellow / dark blue) for comparison">hsv ref</button>
     <button id="hsvEqImage"     class="tab" title="HSV with per-column y-stretch: centerline pinned at L≈0.5 per hue, so the bright-yellow / dark-blue bands are mostly equalized vertically">hsv y-eq</button>
     <button id="resetImage"     class="tab" title="Procedural sunset landscape">sunset</button>
@@ -2605,6 +2606,41 @@ function makeOkhplPickerImage(){
   return cv;
 }
 
+// Same as ok-hpl+ but with the y axis bent — the chroma peak (l ≈ 0.55,
+// where Ok-HPLuv minCusp is widest) sits ~20% from the top instead of mid.
+// White→saturated transition is compressed into the top fifth; the rest of
+// the image stays saturated and ramps to black. More saturated screen area
+// at bright tones, less white space. Boost bumped slightly higher since
+// the compressed bright band tolerates a richer chroma.
+function makeOkhplBrightPickerImage(){
+  const W = 720, H = 460;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const raw = new Uint8ClampedArray(W * H * 4);
+  const yPeakFrac = 0.2;            // chroma peak ~20% from top
+  const lPeak     = 0.55;           // Ok-HPLuv minCusp(L) peaks around toed l ≈ 0.55
+  const yPeak     = (H - 1) * yPeakFrac;
+  for (let y = 0; y < H; y++){
+    let l;
+    if (y <= yPeak){
+      l = 1 - (y / yPeak) * (1 - lPeak);
+    } else {
+      l = lPeak - ((y - yPeak) / ((H - 1) - yPeak)) * lPeak;
+    }
+    for (let x = 0; x < W; x++){
+      const h = (x / W) * 360;
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, 2.3);
+      const idx = (y * W + x) * 4;
+      raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
+    }
+  }
+  img.data.set(_smoothHueRing(raw, W, H));
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 // Procedural anime-style scene: sunset sky, cel-shaded mountains, cherry
 // blossom branch, falling petals. Tests cel-shaded palettes (bold sakura
 // pink, sky cyan, mountain violet) and how palettes handle high-saturation
@@ -2763,6 +2799,9 @@ function loadHsvEqImage(){
 }
 function loadOkhplImage(){
   installCanvas(makeOkhplPickerImage(), 'synthetic · ok-hpluv·boost');
+}
+function loadOkhplBrightImage(){
+  installCanvas(makeOkhplBrightPickerImage(), 'synthetic · ok-hpluv·bright');
 }
 function loadPhotoImage(){
   installCanvas(makePhotoImage(), 'synthetic · still life');
@@ -3510,6 +3549,7 @@ function init(){
   bindImageBtn('resetImage',     loadDefaultImage);
   bindImageBtn('hueImage',       loadHueImage);
   bindImageBtn('okhplImage',     loadOkhplImage);
+  bindImageBtn('okhplBrightImage', loadOkhplBrightImage);
   bindImageBtn('hsvImage',       loadHsvRefImage);
   bindImageBtn('hsvEqImage',     loadHsvEqImage);
   bindImageBtn('photoImage',     loadPhotoImage);
