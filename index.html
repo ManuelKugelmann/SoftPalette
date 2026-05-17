@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T15:51:06Z">
+<meta name="build" content="2026-05-17T15:56:13Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:51:06Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:56:13Z</span>
   </div>
 </header>
 
@@ -1493,7 +1493,8 @@ function recomputeLut(){
   // L↔hue correlation is what the user picked, not anything synth seeds added.
   const realSeeds = seeds.filter(s => !s.synthetic);
   uploadLumaCurve(computeLumaCurve(realSeeds.length ? realSeeds : seeds));
-  uploadHueLCCurve(computeHueLCCurve(seeds));
+  state.hueLCCurve = computeHueLCCurve(seeds);
+  uploadHueLCCurve(state.hueLCCurve);
   ensureLutTexture(N);
 
   const prog = state.programs.lutBuild;
@@ -2928,9 +2929,51 @@ function renderHuePreview(){
     dst.set(src.subarray(srcRow, srcRow + W * 4), dstRow);
   }
   ctx.putImageData(img, 0, 0);
+  _overlayHueEnvelope(ctx, W, H);
 
   renderIdwPreview();
   renderLutSlicePreview();
+}
+
+// Draw two horizontal "lines" tracing the per-hue luminance envelope (L_min
+// and L_max from state.hueLCCurve, plus the current ±lExt slider extent) on
+// the hues preview canvas. Top line is the upper L bound, bottom is the
+// lower bound — the band between them is the L interval the envelope
+// permits at each hue.
+function _overlayHueEnvelope(ctx, W, H){
+  const curve = state.hueLCCurve;
+  if (!curve) return;
+  const lExt = state.params.lExt;
+  const BINS = HUE_ENV_BINS;
+  function sampleEnv(x){
+    // Hues preview x → hue ∈ [-π, π). Curve bin centers at (i+0.5)/BINS in
+    // [0,1) → [-π, π). Wrap-around at the seam.
+    const t = (x + 0.5) / W;            // [0, 1)
+    const f = ((t * BINS) - 0.5 + BINS) % BINS;
+    const i0 = Math.floor(f) % BINS;
+    const i1 = (i0 + 1) % BINS;
+    const u = f - Math.floor(f);
+    const lLo = curve[i0*4+0] * (1 - u) + curve[i1*4+0] * u;
+    const lHi = curve[i0*4+1] * (1 - u) + curve[i1*4+1] * u;
+    return [
+      Math.max(0, lLo - lExt),
+      Math.min(1, lHi + lExt),
+    ];
+  }
+  // Black underlay then white overlay for contrast against either light or
+  // dark regions of the picker.
+  ctx.save();
+  for (const [color, dy] of [['rgba(0,0,0,0.85)', 0], ['rgba(255,255,255,0.85)', 1]]){
+    ctx.fillStyle = color;
+    for (let x = 0; x < W; x++){
+      const [lo, hi] = sampleEnv(x);
+      const yLo = Math.max(0, Math.min(H - 1, Math.round((1 - lo) * (H - 1)) + dy));
+      const yHi = Math.max(0, Math.min(H - 1, Math.round((1 - hi) * (H - 1)) + dy));
+      ctx.fillRect(x, yLo, 1, 1);
+      ctx.fillRect(x, yHi, 1, 1);
+    }
+  }
+  ctx.restore();
 }
 
 // Filled circle in the current 2D context, used as an anchor marker on the
