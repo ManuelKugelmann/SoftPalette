@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T06:47:16Z">
+<meta name="build" content="2026-05-17T06:51:50Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:47:16Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:51:50Z</span>
   </div>
 </header>
 
@@ -2606,12 +2606,12 @@ function makeOkhplPickerImage(){
   return cv;
 }
 
-// Same as ok-hpl+ but with the y axis bent — the chroma peak (l ≈ 0.55,
-// where Ok-HPLuv minCusp is widest) sits ~20% from the top instead of mid.
-// White→saturated transition is compressed into the top fifth; the rest of
-// the image stays saturated and ramps to black. More saturated screen area
-// at bright tones, less white space. Boost bumped slightly higher since
-// the compressed bright band tolerates a richer chroma.
+// Same as ok-hpl+ but with the chroma boost ramped higher in the upper
+// third of the image. Lightness ramp stays linear (white at top, black at
+// bottom — identical to ok-hpl+). Boost: 2.0 below y=H/3, ramping up
+// quadratically to 3.0 at y=0. The upper region shows richer chroma where
+// the natural Ok-HPLuv minCusp is narrow; per-channel clipping handles the
+// gamut overflow gracefully (white at y=0 regardless).
 function makeOkhplBrightPickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2619,19 +2619,17 @@ function makeOkhplBrightPickerImage(){
   const ctx = cv.getContext('2d');
   const img = ctx.createImageData(W, H);
   const raw = new Uint8ClampedArray(W * H * 4);
-  const yPeakFrac = 0.2;            // chroma peak ~20% from top
-  const lPeak     = 0.55;           // Ok-HPLuv minCusp(L) peaks around toed l ≈ 0.55
-  const yPeak     = (H - 1) * yPeakFrac;
   for (let y = 0; y < H; y++){
-    let l;
-    if (y <= yPeak){
-      l = 1 - (y / yPeak) * (1 - lPeak);
-    } else {
-      l = lPeak - ((y - yPeak) / ((H - 1) - yPeak)) * lPeak;
+    const l = 1 - y / (H - 1);
+    const yFrac = y / (H - 1);
+    let boost = 2.0;
+    if (yFrac < 1 / 3){
+      const t = 1 - yFrac * 3;       // 1 at top, 0 at y=H/3
+      boost += 1.0 * t * t;          // quadratic ease in upper third
     }
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = okhplBoostedToRgb(h, 1, l, 2.3);
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, boost);
       const idx = (y * W + x) * 4;
       raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
     }
