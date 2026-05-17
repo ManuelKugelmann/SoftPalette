@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T07:00:04Z">
+<meta name="build" content="2026-05-17T07:02:30Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T07:00:04Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T07:02:30Z</span>
   </div>
 </header>
 
@@ -2652,10 +2652,11 @@ function makeOkhplBrightPickerImage(){
       raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
     }
   }
-  // Extra smoothing passes for the bright variant — per-hue blending in the
-  // top band introduces flatter but wider chroma peaks at yellow / green;
-  // 6 passes smooth them into gentle bumps rather than visible peaks.
-  img.data.set(_smoothHueRing(raw, W, H, 6));
+  // Light smoothing only — too many passes flatten the pure-hue peaks
+  // (yellow / green / red / cyan / pink) below visibility. Two passes
+  // keep the peaks distinct while still hiding the polynomial-branch
+  // handoff kinks.
+  img.data.set(_smoothHueRing(raw, W, H, 2));
   ctx.putImageData(img, 0, 0);
   return cv;
 }
