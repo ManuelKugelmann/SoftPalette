@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T15:56:13Z">
+<meta name="build" content="2026-05-17T16:53:39Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:56:13Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T16:53:39Z</span>
   </div>
 </header>
 
@@ -1300,60 +1300,104 @@ function uploadSeeds(packed){
 // means is a smoothstep across the cluster L means.
 const LUMA_BINS = 16;
 const HUE_ENV_BINS = 32;
-// Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians). For
-// each hue bin we weight every chromatic palette anchor by:
-//   • a Gaussian in angular hue distance (σ_hue = π/3) — closer hues matter
-//     more, anchors across the wheel matter less,
-//   • the anchor's chroma magnitude — saturated anchors dominate over
-//     near-grey ones (which would otherwise pull the envelope towards 0),
-//   • and the anchor's own strength.
-// Then we take a soft-min and soft-max of L (and C) with β = 8 — actual
-// extreme bounds, not symmetric mean ± std-dev. β = 8 stays smooth across
-// the hue ring (no posterized bin-to-bin step). The shader adds ± slider
-// extent slack on top, so the envelope per hue is [softMin·L − lExt,
-// softMax·L + lExt], analogously for chroma.
+// Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians).
+// L bounds = upper and lower convex hulls of palette anchors in (hue, L)
+// space (cyclic). Inside the hull, output L passes through unchanged
+// (the shader's soft-clamp activates only outside the band). Between
+// hull anchors the bounds are linearly interpolated by hue, so the
+// envelope smoothly varies; outside the hull the value is snapped to
+// the nearest hull edge. The shader adds ±lExt slider extent as buffer.
+// Chroma envelope = max over anchors of (s.C × triangular falloff over
+// hue distance, radius = π/2) — main branch's smooth per-hue chroma
+// ceiling. L_lo (C_lo) bottom always pinned to 0 since darks are valid
+// passthrough.
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
-  const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02);
+  // Convex hull over USER-curated anchors only. Synthetic blackpoint /
+  // whitepoint / auto-extend ghosts are excluded so the envelope reflects
+  // the palette the user actually chose, not the IDW-helper synths.
+  const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02 && !s.synthetic);
+  const TWO_PI = 2 * Math.PI;
   if (ch.length === 0){
     let sL = 0, sC = 0;
     for (const s of seeds){ sL += s.L; sC += Math.hypot(s.a, s.b); }
     const mL = seeds.length ? sL / seeds.length : 0.5;
     const mC = seeds.length ? sC / seeds.length : 0;
     for (let i = 0; i < HUE_ENV_BINS; i++){
-      buf[i*4+0] = mL; buf[i*4+1] = mL; buf[i*4+2] = mC; buf[i*4+3] = mC;
+      buf[i*4+0] = mL; buf[i*4+1] = mL; buf[i*4+2] = 0; buf[i*4+3] = mC;
     }
     return buf;
   }
   const A = ch.map(s => ({
-    h: Math.atan2(s.b, s.a),
+    h: ((Math.atan2(s.b, s.a) % TWO_PI) + TWO_PI) % TWO_PI,
     L: s.L,
     C: Math.hypot(s.a, s.b),
-    w0: (s.strength != null ? s.strength : 1) * Math.hypot(s.a, s.b),
-  }));
-  const sigma  = Math.PI / 3;
-  const inv2s2 = 1 / (2 * sigma * sigma);
-  const beta   = 8;
-  for (let i = 0; i < HUE_ENV_BINS; i++){
-    const tt = ((i + 0.5) / HUE_ENV_BINS) * 2 * Math.PI - Math.PI;
-    let sumW = 1e-12, sumNegL = 0, sumPosL = 0, sumNegC = 0, sumPosC = 0;
-    for (const s of A){
-      let d = Math.abs(s.h - tt);
-      if (d > Math.PI) d = 2 * Math.PI - d;
-      const w = Math.exp(-d * d * inv2s2) * s.w0;
-      sumW    += w;
-      sumNegL += w * Math.exp(-beta * s.L);
-      sumPosL += w * Math.exp( beta * s.L);
-      sumNegC += w * Math.exp(-beta * s.C);
-      sumPosC += w * Math.exp( beta * s.C);
+  })).sort((a, b) => a.h - b.h);
+
+  // Build cyclic hull by walking the sorted ring twice (concat shifted copy).
+  // compare(b.L, lineL) returns true if mid anchor b should be removed —
+  // it's "inside" the line between its neighbors. Upper hull keeps anchors
+  // that locally maximise L; lower hull keeps anchors that locally
+  // minimise L.
+  function buildHull(compare){
+    const ext = [];
+    for (const a of A) ext.push({h: a.h,           L: a.L});
+    for (const a of A) ext.push({h: a.h + TWO_PI,  L: a.L});
+    const stack = [];
+    for (const p of ext){
+      while (stack.length >= 2){
+        const a = stack[stack.length - 2];
+        const b = stack[stack.length - 1];
+        if (p.h <= a.h){ stack.pop(); continue; }
+        const t = (b.h - a.h) / (p.h - a.h);
+        const lineL = a.L * (1 - t) + p.L * t;
+        if (compare(b.L, lineL)) stack.pop(); else break;
+      }
+      stack.push(p);
     }
-    const lLo = Math.max(0, -Math.log(sumNegL / sumW) / beta);
-    const lHi = Math.min(1,  Math.log(sumPosL / sumW) / beta);
-    const cLo = Math.max(0, -Math.log(sumNegC / sumW) / beta);
-    const cHi =              Math.log(sumPosC / sumW) / beta;
+    return stack;
+  }
+  const upperHull = buildHull((bL, lineL) => bL < lineL - 1e-9);
+  const lowerHull = buildHull((bL, lineL) => bL > lineL + 1e-9);
+
+  function sample(hull, h){
+    // h ∈ [0, 2π). Find segment [hull[i].h, hull[i+1].h] containing h
+    // (allowing one wrap forward if needed).
+    let hs = h;
+    if (hs < hull[0].h) hs += TWO_PI;
+    for (let i = 0; i < hull.length - 1; i++){
+      if (hs >= hull[i].h && hs <= hull[i+1].h){
+        const seg = hull[i+1].h - hull[i].h;
+        if (seg < 1e-9) return hull[i].L;
+        const t = (hs - hull[i].h) / seg;
+        return hull[i].L * (1 - t) + hull[i+1].L * t;
+      }
+    }
+    return hull[hull.length - 1].L;
+  }
+
+  const radius = Math.PI / 2;
+  function cMaxAt(h){
+    let m = 0;
+    for (const s of A){
+      let d = Math.abs(h - s.h);
+      if (d > Math.PI) d = TWO_PI - d;
+      if (d < radius){
+        const c = s.C * (1 - d / radius);
+        if (c > m) m = c;
+      }
+    }
+    return m;
+  }
+
+  for (let i = 0; i < HUE_ENV_BINS; i++){
+    const hp = ((i + 0.5) / HUE_ENV_BINS) * TWO_PI;
+    const lLo = Math.max(0, Math.min(1, sample(lowerHull, hp)));
+    const lHi = Math.max(0, Math.min(1, sample(upperHull, hp)));
+    const cHi = cMaxAt(hp);
     buf[i*4+0] = lLo;
     buf[i*4+1] = lHi;
-    buf[i*4+2] = cLo;
+    buf[i*4+2] = 0;
     buf[i*4+3] = cHi;
   }
   return buf;
@@ -2929,7 +2973,6 @@ function renderHuePreview(){
     dst.set(src.subarray(srcRow, srcRow + W * 4), dstRow);
   }
   ctx.putImageData(img, 0, 0);
-  _overlayHueEnvelope(ctx, W, H);
 
   renderIdwPreview();
   renderLutSlicePreview();
@@ -3013,6 +3056,7 @@ function renderIdwPreview(){
     _writeLabToRGBA(dst, o, oL, oa, ob);
   }
   ctx.putImageData(img, 0, 0);
+  _overlayHueEnvelope(ctx, W, H);
   // Anchor markers: map each anchor to its position on the hue picker
   // representation. x ← hue (0..360°), y ← L (top = bright, bot = dark).
   // Marker fill = the IDW result sampled at that pixel, so the dot blends
