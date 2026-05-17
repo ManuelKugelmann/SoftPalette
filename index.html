@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T06:51:50Z">
+<meta name="build" content="2026-05-17T06:56:09Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:51:50Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:56:09Z</span>
   </div>
 </header>
 
@@ -810,7 +810,7 @@ function _ensureOkhplLut(){
   }
   _okhplLutReady = true;
 }
-function okhplBoostedToRgb(h, s, l, boost){
+function okhplBoostedToRgb(h, s, l, boost, perHueWeight){
   if (l >= 1) return [255, 255, 255];
   if (l <= 0) return [0, 0, 0];
   _ensureOkhplLut();
@@ -819,9 +819,25 @@ function okhplBoostedToRgb(h, s, l, boost){
   const i0 = Math.floor(f), i1 = Math.min(255, i0 + 1);
   const t = f - i0;
   const minC = _okhplLut[i0] * (1 - t) + _okhplLut[i1] * t;
-  const C = boost * s * minC;
   const hr = h * Math.PI / 180;
-  const aa = C * Math.cos(hr), bb = C * Math.sin(hr);
+  const a = Math.cos(hr), b = Math.sin(hr);
+  let C = boost * s * minC;
+  // perHueWeight ∈ [0,1] blends toward per-hue gamut max (HSLuv-style) — at 1
+  // the chroma reaches the per-hue sRGB cusp instead of the uniform Ok-HPLuv
+  // floor, so high-gamut hues (yellow, green) can be vivid where the uniform
+  // floor would cap them.
+  if (perHueWeight && perHueWeight > 0){
+    const cusp = _okhslCusp(a, b);
+    let perHueC = _okhslGamutIntersection(a, b, L, 1, L, cusp);
+    // Cap the per-hue peak to a small multiple of the uniform floor so
+    // high-gamut hues (yellow, green) don't jut wildly above neighboring
+    // hues. The cap gives a flatter, smoother peak when the picker blends
+    // toward per-hue chroma in the bright band.
+    const peakCap = (boost + 0.6) * minC;
+    perHueC = Math.min(perHueC, peakCap);
+    C = (1 - perHueWeight) * C + perHueWeight * perHueC * s;
+  }
+  const aa = C * a, bb = C * b;
   const lin = oklabToLinearJS(L, aa, bb);
   const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
   const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
@@ -2414,7 +2430,7 @@ function makeLandscapeImage(){
 // Kills the small kinks the Okhsl analytic gamut intersection produces at
 // branch transitions (where one sRGB channel limits hands off to another),
 // without losing per-row brightness or breaking chroma.
-function _smoothHueRing(buf, W, H){
+function _smoothHueRing(buf, W, H, passes){
   const kernel = [1, 4, 6, 4, 1], ksum = 16;
   const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
   const toSrgb = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
@@ -2444,7 +2460,10 @@ function _smoothHueRing(buf, W, H){
     }
     return out;
   }
-  return pass(pass(pass(buf)));
+  const n = passes != null ? passes : 3;
+  let out = buf;
+  for (let i = 0; i < n; i++) out = pass(out);
+  return out;
 }
 function makeHuePickerImage(){
   const W = 720, H = 460;
@@ -2607,11 +2626,12 @@ function makeOkhplPickerImage(){
 }
 
 // Same as ok-hpl+ but with the chroma boost ramped higher in the upper
-// third of the image. Lightness ramp stays linear (white at top, black at
-// bottom — identical to ok-hpl+). Boost: 2.0 below y=H/3, ramping up
-// quadratically to 3.0 at y=0. The upper region shows richer chroma where
-// the natural Ok-HPLuv minCusp is narrow; per-channel clipping handles the
-// gamut overflow gracefully (white at y=0 regardless).
+// third of the image, plus a per-hue blend so high-gamut hues (yellow,
+// green) can reach their own gamut where the uniform Ok-HPLuv floor would
+// cap them. Lightness ramp stays linear (identical to ok-hpl+). Below
+// y=H/3 the picker is identical to ok-hpl+; above, boost ramps to 3.0 and
+// perHueWeight ramps to 1.0 so the top band shows bright yellow / green
+// / cyan at their per-hue gamut max (HSLuv-like in that band only).
 function makeOkhplBrightPickerImage(){
   const W = 720, H = 460;
   const cv = document.createElement('canvas');
@@ -2622,19 +2642,23 @@ function makeOkhplBrightPickerImage(){
   for (let y = 0; y < H; y++){
     const l = 1 - y / (H - 1);
     const yFrac = y / (H - 1);
-    let boost = 2.0;
+    let boost = 2.0, perHue = 0;
     if (yFrac < 1 / 3){
       const t = 1 - yFrac * 3;       // 1 at top, 0 at y=H/3
       boost += 1.0 * t * t;          // quadratic ease in upper third
+      perHue = t * t;                // 0 at y=H/3 → 1 at y=0
     }
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = okhplBoostedToRgb(h, 1, l, boost);
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, boost, perHue);
       const idx = (y * W + x) * 4;
       raw[idx] = r; raw[idx+1] = g; raw[idx+2] = b; raw[idx+3] = 255;
     }
   }
-  img.data.set(_smoothHueRing(raw, W, H));
+  // Extra smoothing passes for the bright variant — per-hue blending in the
+  // top band introduces flatter but wider chroma peaks at yellow / green;
+  // 6 passes smooth them into gentle bumps rather than visible peaks.
+  img.data.set(_smoothHueRing(raw, W, H, 6));
   ctx.putImageData(img, 0, 0);
   return cv;
 }
