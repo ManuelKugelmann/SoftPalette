@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T15:45:04Z">
+<meta name="build" content="2026-05-17T15:51:06Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:45:04Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T15:51:06Z</span>
   </div>
 </header>
 
@@ -1300,14 +1300,18 @@ function uploadSeeds(packed){
 // means is a smoothstep across the cluster L means.
 const LUMA_BINS = 16;
 const HUE_ENV_BINS = 32;
-// Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians). Each
-// bin stores Gaussian-weighted mean and std-dev of palette anchor L and C
-// (σ_hue = π/3); bounds = mean ± √3 · std so the envelope width naturally
-// tracks the local anchor spread. Where the palette has anchors clustered
-// tightly in L (or C) at this hue, the envelope is narrow; where the
-// spread is wide, the envelope is wide. The shader adds ± slider extent
-// on top. Single Gaussian moments → smooth bounds (no bin-to-bin step that
-// soft-min/soft-max with sharp β produced as posterized rings earlier).
+// Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians). For
+// each hue bin we weight every chromatic palette anchor by:
+//   • a Gaussian in angular hue distance (σ_hue = π/3) — closer hues matter
+//     more, anchors across the wheel matter less,
+//   • the anchor's chroma magnitude — saturated anchors dominate over
+//     near-grey ones (which would otherwise pull the envelope towards 0),
+//   • and the anchor's own strength.
+// Then we take a soft-min and soft-max of L (and C) with β = 8 — actual
+// extreme bounds, not symmetric mean ± std-dev. β = 8 stays smooth across
+// the hue ring (no posterized bin-to-bin step). The shader adds ± slider
+// extent slack on top, so the envelope per hue is [softMin·L − lExt,
+// softMax·L + lExt], analogously for chroma.
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
   const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02);
@@ -1325,36 +1329,32 @@ function computeHueLCCurve(seeds){
     h: Math.atan2(s.b, s.a),
     L: s.L,
     C: Math.hypot(s.a, s.b),
-    w0: s.strength != null ? s.strength : 1,
+    w0: (s.strength != null ? s.strength : 1) * Math.hypot(s.a, s.b),
   }));
-  const sigma   = Math.PI / 3;
-  const inv2s2  = 1 / (2 * sigma * sigma);
-  const kSpread = Math.sqrt(3);
+  const sigma  = Math.PI / 3;
+  const inv2s2 = 1 / (2 * sigma * sigma);
+  const beta   = 8;
   for (let i = 0; i < HUE_ENV_BINS; i++){
     const tt = ((i + 0.5) / HUE_ENV_BINS) * 2 * Math.PI - Math.PI;
-    let sumW = 1e-12, sL = 0, sC = 0;
+    let sumW = 1e-12, sumNegL = 0, sumPosL = 0, sumNegC = 0, sumPosC = 0;
     for (const s of A){
       let d = Math.abs(s.h - tt);
       if (d > Math.PI) d = 2 * Math.PI - d;
       const w = Math.exp(-d * d * inv2s2) * s.w0;
-      sumW += w; sL += w * s.L; sC += w * s.C;
+      sumW    += w;
+      sumNegL += w * Math.exp(-beta * s.L);
+      sumPosL += w * Math.exp( beta * s.L);
+      sumNegC += w * Math.exp(-beta * s.C);
+      sumPosC += w * Math.exp( beta * s.C);
     }
-    const mL = sL / sumW, mC = sC / sumW;
-    let vL = 0, vC = 0;
-    for (const s of A){
-      let d = Math.abs(s.h - tt);
-      if (d > Math.PI) d = 2 * Math.PI - d;
-      const w  = Math.exp(-d * d * inv2s2) * s.w0;
-      const dL = s.L - mL, dC = s.C - mC;
-      vL += w * dL * dL;
-      vC += w * dC * dC;
-    }
-    const stdL = Math.sqrt(vL / sumW);
-    const stdC = Math.sqrt(vC / sumW);
-    buf[i*4+0] = Math.max(0, mL - kSpread * stdL);
-    buf[i*4+1] = Math.min(1, mL + kSpread * stdL);
-    buf[i*4+2] = Math.max(0, mC - kSpread * stdC);
-    buf[i*4+3] =              mC + kSpread * stdC;
+    const lLo = Math.max(0, -Math.log(sumNegL / sumW) / beta);
+    const lHi = Math.min(1,  Math.log(sumPosL / sumW) / beta);
+    const cLo = Math.max(0, -Math.log(sumNegC / sumW) / beta);
+    const cHi =              Math.log(sumPosC / sumW) / beta;
+    buf[i*4+0] = lLo;
+    buf[i*4+1] = lHi;
+    buf[i*4+2] = cLo;
+    buf[i*4+3] = cHi;
   }
   return buf;
 }
