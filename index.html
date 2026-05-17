@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T06:56:09Z">
+<meta name="build" content="2026-05-17T07:00:04Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T06:56:09Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T07:00:04Z</span>
   </div>
 </header>
 
@@ -828,13 +828,10 @@ function okhplBoostedToRgb(h, s, l, boost, perHueWeight){
   // floor would cap them.
   if (perHueWeight && perHueWeight > 0){
     const cusp = _okhslCusp(a, b);
-    let perHueC = _okhslGamutIntersection(a, b, L, 1, L, cusp);
-    // Cap the per-hue peak to a small multiple of the uniform floor so
-    // high-gamut hues (yellow, green) don't jut wildly above neighboring
-    // hues. The cap gives a flatter, smoother peak when the picker blends
-    // toward per-hue chroma in the bright band.
-    const peakCap = (boost + 0.6) * minC;
-    perHueC = Math.min(perHueC, peakCap);
+    const perHueC = _okhslGamutIntersection(a, b, L, 1, L, cusp);
+    // No cap — yellow / green / cyan / red / pink reach their full per-hue
+    // sRGB cusp; blue stays at its natural (narrow) max. Gaussian smoothing
+    // passes keep the peaks gentle rather than sharp.
     C = (1 - perHueWeight) * C + perHueWeight * perHueC * s;
   }
   const aa = C * a, bb = C * b;
