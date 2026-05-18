@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-17T16:53:39Z">
+<meta name="build" content="2026-05-18T17:58:19Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-17T16:53:39Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-18T17:58:19Z</span>
   </div>
 </header>
 
@@ -1192,12 +1192,11 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
   Ao *= reject;
   Bo *= reject;
   Lo = Lo + lRange * (L - Lo);
-  // Hue-interpolated envelope: bounds come from a soft min/max of palette
-  // anchors weighted by hue proximity, so the envelope follows the palette's
-  // hue→(L,C) ramp instead of jumping at Voronoi-cell boundaries.
-  const kL = 0.02, kC = 0.02;
-  const softMax = (x, m, k) => 0.5 * (x + m + Math.sqrt((x - m) * (x - m) + k * k));
-  const softMin = (x, m, k) => 0.5 * (x + m - Math.sqrt((x - m) * (x - m) + k * k));
+  // Hue-interpolated envelope: bounds = convex hull of palette anchors at
+  // this hue (cyclic upper/lower) + ±slider extent slack. Hard clamp:
+  // inside the band passes through unchanged, outside snaps to the
+  // boundary. No soft-clamp smoothing — the hull bounds already vary
+  // smoothly with hue, so there's no Voronoi step that needed softening.
   let envLLo = nearestL, envLHi = nearestL, envCLo = nearestC, envCHi = nearestC;
   if (hueLCCurve){
     const hueT  = Math.atan2(b, a) / (2 * Math.PI) + 0.5;
@@ -1211,15 +1210,13 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
     envCHi = hueLCCurve[i0*4+3] * (1 - t) + hueLCCurve[i1*4+3] * t;
   }
   if (lExt !== undefined){
-    Lo = softMax(Lo, envLLo - lExt, kL);
-    Lo = softMin(Lo, envLHi + lExt, kL);
+    Lo = Math.max(envLLo - lExt, Math.min(envLHi + lExt, Lo));
   }
   if (cExt !== undefined){
     const outC = Math.hypot(Ao, Bo);
     const minC = Math.max(0, envCLo - cExt);
     const maxC = envCHi + cExt;
-    let clampedC = softMax(outC, minC, kC);
-    clampedC = softMin(clampedC, maxC, kC);
+    const clampedC = Math.max(minC, Math.min(maxC, outC));
     if (outC > 1e-6){
       Ao *= clampedC / outC;
       Bo *= clampedC / outC;
@@ -1301,21 +1298,17 @@ function uploadSeeds(packed){
 const LUMA_BINS = 16;
 const HUE_ENV_BINS = 32;
 // Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians).
-// L bounds = upper and lower convex hulls of palette anchors in (hue, L)
-// space (cyclic). Inside the hull, output L passes through unchanged
-// (the shader's soft-clamp activates only outside the band). Between
-// hull anchors the bounds are linearly interpolated by hue, so the
-// envelope smoothly varies; outside the hull the value is snapped to
-// the nearest hull edge. The shader adds ±lExt slider extent as buffer.
-// Chroma envelope = max over anchors of (s.C × triangular falloff over
-// hue distance, radius = π/2) — main branch's smooth per-hue chroma
-// ceiling. L_lo (C_lo) bottom always pinned to 0 since darks are valid
-// passthrough.
+// Per-hue local envelope: at each hue bin, consider anchors within
+// radius = π/2 (90°) of that hue. Weight each by a triangular falloff
+// (1 at the anchor's own hue, 0 at the radius edge), then take soft-min
+// and soft-max of L and C with β=8. Bounds vary smoothly with hue
+// because anchor weights fade in/out continuously as they enter/leave
+// the radius. NOT a convex hull — distant anchors don't connect across
+// the ring, so the envelope stays local to the hue neighborhood.
+// Synthetic anchors (blackpoint/whitepoint, palette-extend ghosts)
+// excluded so the envelope reflects user-curated anchors only.
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
-  // Convex hull over USER-curated anchors only. Synthetic blackpoint /
-  // whitepoint / auto-extend ghosts are excluded so the envelope reflects
-  // the palette the user actually chose, not the IDW-helper synths.
   const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02 && !s.synthetic);
   const TWO_PI = 2 * Math.PI;
   if (ch.length === 0){
@@ -1329,72 +1322,40 @@ function computeHueLCCurve(seeds){
     return buf;
   }
   const A = ch.map(s => ({
-    h: ((Math.atan2(s.b, s.a) % TWO_PI) + TWO_PI) % TWO_PI,
+    h: Math.atan2(s.b, s.a),
     L: s.L,
     C: Math.hypot(s.a, s.b),
-  })).sort((a, b) => a.h - b.h);
-
-  // Build cyclic hull by walking the sorted ring twice (concat shifted copy).
-  // compare(b.L, lineL) returns true if mid anchor b should be removed —
-  // it's "inside" the line between its neighbors. Upper hull keeps anchors
-  // that locally maximise L; lower hull keeps anchors that locally
-  // minimise L.
-  function buildHull(compare){
-    const ext = [];
-    for (const a of A) ext.push({h: a.h,           L: a.L});
-    for (const a of A) ext.push({h: a.h + TWO_PI,  L: a.L});
-    const stack = [];
-    for (const p of ext){
-      while (stack.length >= 2){
-        const a = stack[stack.length - 2];
-        const b = stack[stack.length - 1];
-        if (p.h <= a.h){ stack.pop(); continue; }
-        const t = (b.h - a.h) / (p.h - a.h);
-        const lineL = a.L * (1 - t) + p.L * t;
-        if (compare(b.L, lineL)) stack.pop(); else break;
-      }
-      stack.push(p);
-    }
-    return stack;
+  }));
+  // Global fallback bounds (if no anchor is within radius at a bin)
+  let gLo = Infinity, gHi = -Infinity, gCHi = 0;
+  for (const a of A){
+    if (a.L < gLo) gLo = a.L;
+    if (a.L > gHi) gHi = a.L;
+    if (a.C > gCHi) gCHi = a.C;
   }
-  const upperHull = buildHull((bL, lineL) => bL < lineL - 1e-9);
-  const lowerHull = buildHull((bL, lineL) => bL > lineL + 1e-9);
-
-  function sample(hull, h){
-    // h ∈ [0, 2π). Find segment [hull[i].h, hull[i+1].h] containing h
-    // (allowing one wrap forward if needed).
-    let hs = h;
-    if (hs < hull[0].h) hs += TWO_PI;
-    for (let i = 0; i < hull.length - 1; i++){
-      if (hs >= hull[i].h && hs <= hull[i+1].h){
-        const seg = hull[i+1].h - hull[i].h;
-        if (seg < 1e-9) return hull[i].L;
-        const t = (hs - hull[i].h) / seg;
-        return hull[i].L * (1 - t) + hull[i+1].L * t;
-      }
-    }
-    return hull[hull.length - 1].L;
-  }
-
   const radius = Math.PI / 2;
-  function cMaxAt(h){
-    let m = 0;
-    for (const s of A){
-      let d = Math.abs(h - s.h);
-      if (d > Math.PI) d = TWO_PI - d;
-      if (d < radius){
-        const c = s.C * (1 - d / radius);
-        if (c > m) m = c;
-      }
-    }
-    return m;
-  }
-
+  const beta   = 8;
   for (let i = 0; i < HUE_ENV_BINS; i++){
-    const hp = ((i + 0.5) / HUE_ENV_BINS) * TWO_PI;
-    const lLo = Math.max(0, Math.min(1, sample(lowerHull, hp)));
-    const lHi = Math.max(0, Math.min(1, sample(upperHull, hp)));
-    const cHi = cMaxAt(hp);
+    const h = ((i + 0.5) / HUE_ENV_BINS) * TWO_PI - Math.PI;
+    let sumW = 0, sumNegL = 0, sumPosL = 0, sumPosC = 0;
+    for (const s of A){
+      let d = Math.abs(s.h - h);
+      if (d > Math.PI) d = TWO_PI - d;
+      if (d >= radius) continue;
+      const w = 1 - d / radius;
+      sumW    += w;
+      sumNegL += w * Math.exp(-beta * s.L);
+      sumPosL += w * Math.exp( beta * s.L);
+      sumPosC += w * Math.exp( beta * s.C);
+    }
+    let lLo, lHi, cHi;
+    if (sumW > 1e-9){
+      lLo = Math.max(0, -Math.log(sumNegL / sumW) / beta);
+      lHi = Math.min(1,  Math.log(sumPosL / sumW) / beta);
+      cHi =              Math.log(sumPosC / sumW) / beta;
+    } else {
+      lLo = gLo; lHi = gHi; cHi = gCHi;
+    }
     buf[i*4+0] = lLo;
     buf[i*4+1] = lHi;
     buf[i*4+2] = 0;
@@ -1887,15 +1848,16 @@ void main(){
   vec4 envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
   float envLLo = envHue.r, envLHi = envHue.g;
   float envCLo = envHue.b, envCHi = envHue.a;
-  const float kL = 0.02;
-  const float kC = 0.02;
-  lab.x = softMax(lab.x, envLLo - uLExt, kL);
-  lab.x = softMin(lab.x, envLHi + uLExt, kL);
+  // Hard clamp: inside [envLLo − uLExt, envLHi + uLExt] passes through
+  // unchanged; outside snaps to the nearest boundary. The hue-curve already
+  // varies smoothly so the bounds don't jump per hue → no soft-clamp band
+  // needed (it was causing a small darkening near the upper edge and
+  // lifting near the lower edge even for in-band inputs).
+  lab.x = clamp(lab.x, envLLo - uLExt, envLHi + uLExt);
   float outC      = length(lab.yz);
   float minC      = max(0.0, envCLo - uCExt);
   float maxC      = envCHi + uCExt;
-  float clampedC  = softMax(outC, minC, kC);
-  clampedC        = softMin(clampedC, maxC, kC);
+  float clampedC  = clamp(outC, minC, maxC);
   if (outC > 1e-6) lab.yz *= clampedC / outC;
   fragColor = vec4(lab, 1.0);
 }`;
@@ -2989,13 +2951,16 @@ function _overlayHueEnvelope(ctx, W, H){
   const lExt = state.params.lExt;
   const BINS = HUE_ENV_BINS;
   function sampleEnv(x){
-    // Hues preview x → hue ∈ [-π, π). Curve bin centers at (i+0.5)/BINS in
-    // [0,1) → [-π, π). Wrap-around at the seam.
-    const t = (x + 0.5) / W;            // [0, 1)
-    const f = ((t * BINS) - 0.5 + BINS) % BINS;
-    const i0 = Math.floor(f) % BINS;
-    const i1 = (i0 + 1) % BINS;
-    const u = f - Math.floor(f);
+    // Image x represents compass hue ((x/W) × 360°). The curve is indexed by
+    // atan2 hue ([-π, π)), with bin 0 centered at atan2 ≈ -π+π/BINS. To
+    // sample the right bin at this image hue, shift compass by +0.5 turn
+    // (= 180° = π) so hueT matches the texture coordinate convention.
+    const compassT = (x + 0.5) / W;
+    const hueT     = (compassT + 0.5) % 1;       // align compass → atan2
+    const f        = hueT * BINS - 0.5;          // bin centers
+    const i0       = ((Math.floor(f) % BINS) + BINS) % BINS;
+    const i1       = (i0 + 1) % BINS;
+    const u        = f - Math.floor(f);
     const lLo = curve[i0*4+0] * (1 - u) + curve[i1*4+0] * u;
     const lHi = curve[i0*4+1] * (1 - u) + curve[i1*4+1] * u;
     return [
