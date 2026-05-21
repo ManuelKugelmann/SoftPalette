@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T08:33:47Z">
+<meta name="build" content="2026-05-21T08:50:46Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T08:33:47Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T08:50:46Z</span>
   </div>
 </header>
 
@@ -1747,6 +1747,12 @@ function applyLumaLookPass(){
   gl.uniform1i(gl.getUniformLocation(prog, 'uLumaCurve'), 2);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLumaLook'), state.params.lumaLook || 0);
   gl.uniform1f(gl.getUniformLocation(prog, 'uN'), N);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+  if (state.hueLCTex){
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, state.hueLCTex);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uHueLCCurve'), 3);
+  }
   const uZ = gl.getUniformLocation(prog, 'uZ');
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
@@ -2256,9 +2262,11 @@ precision highp sampler3D;
 out vec4 fragColor;
 uniform sampler3D uLutRaw;
 uniform sampler2D uLumaCurve;
+uniform sampler2D uHueLCCurve;
 uniform float uLumaLook;
 uniform float uN;
 uniform float uZ;
+uniform float uAbRange;
 void main(){
   float N    = uN;
   float ai   = floor(gl_FragCoord.x);
@@ -2266,10 +2274,27 @@ void main(){
   vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
   vec3  lab  = texture(uLutRaw, uvw).rgb;
   if (uLumaLook > 0.0){
-    float L = uZ / max(N - 1.0, 1.0);
-    vec2 expected   = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
-    float midWeight = 0.2 + 0.8 * abs(L - 0.5) * 2.0;
-    lab.yz = mix(lab.yz, expected, uLumaLook * midWeight);
+    // Cell INPUT position in the LUT cube (not the output Lab stored in the cell).
+    float L_in = uZ / max(N - 1.0, 1.0);
+    float a_in = -uAbRange + (ai / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
+    float b_in = -uAbRange + (bi / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
+    float C_in = length(vec2(a_in, b_in));
+    // Raw per-hue envelope (no slider boost): (L_lo, L_hi, C_lo, C_hi).
+    float PI    = 3.14159265359;
+    float hueT  = atan(b_in, a_in) / (2.0 * PI) + 0.5;
+    vec4  env   = texture(uHueLCCurve, vec2(hueT, 0.5));
+    // Distance OUTSIDE the envelope (positive = outside; ≤ 0 = inside).
+    float dL = max(env.r - L_in, L_in - env.g);
+    float dC = max(env.b - C_in, C_in - env.a);
+    float outside = max(0.0, max(dL, dC));
+    // Smooth ramp from 0 (just outside) to 1 (well outside), so the
+    // luma-look fades in past the envelope edge rather than snapping on.
+    float outsideAmt = smoothstep(0.0, 0.08, outside);
+    if (outsideAmt > 0.0){
+      vec2 expected   = texture(uLumaCurve, vec2(clamp(L_in, 0.0, 1.0), 0.5)).rg;
+      float midWeight = 0.2 + 0.8 * abs(L_in - 0.5) * 2.0;
+      lab.yz = mix(lab.yz, expected, uLumaLook * midWeight * outsideAmt);
+    }
   }
   fragColor = vec4(lab, 1.0);
 }`;
