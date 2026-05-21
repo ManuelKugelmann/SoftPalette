@@ -403,6 +403,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         </div>
         <input type="range" id="stripeEnvBoost" min="-50" max="200" step="5" value="0">
       </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl">
+          <span>luma envelope</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
+            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeLCeil"  checked style="margin:0">ceil</label>
+            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeLFloor" checked style="margin:0">floor</label>
+            <span class="v" id="vStripeLBoost">+0%</span>
+          </span>
+        </div>
+        <input type="range" id="stripeLBoost" min="-50" max="100" step="5" value="0">
+      </div>
     </div>
 
     <div class="note" id="lutStatus" style="margin-top:6px"></div>
@@ -574,6 +585,9 @@ const state = {
     stripeEnvBoost: 0,     // chroma envelope boost, %
     stripeEnvOn:    true,  // per-hue chroma envelope ceiling
     stripeEnvFloor: false, // per-hue chroma envelope floor
+    stripeLCeil:    true,  // global L ceiling at palette Lmax (+boost)
+    stripeLFloor:   true,  // global L floor at palette Lmin (-boost)
+    stripeLBoost:   0,     // L envelope boost, % of palette L range
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
     // step COUNTS (≤ 32). With slider at N, each anchor walks N times in
@@ -1643,7 +1657,14 @@ function stripes_buildLut(N){
   const env = stripes_paletteEnvelope(seeds);
   // Resolve clamp values from envelope (no separate sliders in this branch
   // for main's lFloor/lCeil/cFloor/cCeil — use palette extremes directly).
-  const stamp_p = {lFloor: env.Lmin, lCeil: env.Lmax, cFloor: 0, cCeil: 0.40};
+  // L envelope: bounds = [env.Lmin, env.Lmax], extended by stripeLBoost
+  // (percent of palette L-range). Toggling stripeLFloor / stripeLCeil off
+  // disables that side (clamp pushed to 0 / 1).
+  const lRange = Math.max(0, env.Lmax - env.Lmin);
+  const lBoost = (p.stripeLBoost || 0) / 100 * lRange;
+  const lFloor = p.stripeLFloor ? Math.max(0, env.Lmin - lBoost) : 0;
+  const lCeil  = p.stripeLCeil  ? Math.min(1, env.Lmax + lBoost) : 1;
+  const stamp_p = {lFloor, lCeil, cFloor: 0, cCeil: 0.40};
   const stripeRad = p.stripeRad;
   const iters = Math.max(1, Math.round(p.smoothness || 1));
   const boost = 1 + (p.stripeEnvBoost || 0) / 100;
@@ -3940,6 +3961,21 @@ function init(){
   }
   bindStripesToggle('stripeEnvOn',    'stripeEnvOn');
   bindStripesToggle('stripeEnvFloor', 'stripeEnvFloor');
+  bindStripesToggle('stripeLCeil',    'stripeLCeil');
+  bindStripesToggle('stripeLFloor',   'stripeLFloor');
+  (function(){
+    const inp = document.getElementById('stripeLBoost');
+    const lbl = document.getElementById('vStripeLBoost');
+    if (!inp || !lbl) return;
+    inp.value = state.params.stripeLBoost;
+    lbl.textContent = (state.params.stripeLBoost >= 0 ? '+' : '') + state.params.stripeLBoost + '%';
+    inp.addEventListener('input', () => {
+      const v = parseFloat(inp.value);
+      state.params.stripeLBoost = v;
+      lbl.textContent = (v >= 0 ? '+' : '') + v + '%';
+      scheduleLutRebuild();
+    });
+  })();
 
   // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
   // Slider == 0 disables that axis. Number of inserts per gap is automatic
