@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:26:39Z">
+<meta name="build" content="2026-05-21T10:50:14Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:26:39Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:50:14Z</span>
   </div>
 </header>
 
@@ -364,6 +364,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>stripe softness</span><span class="v" id="vStripeSoftness">0.00</span></div>
         <input type="range" id="stripeSoftness" min="0" max="1" step="0.01" value="0.0">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>stripe iters</span><span class="v" id="vStripeIters">2</span></div>
+        <input type="range" id="stripeIters" min="0" max="12" step="1" value="2">
       </div>
     </div>
 
@@ -602,6 +606,7 @@ const state = {
     // Stripes-method params.
     stripeRad:      0.04,  // hue radius (rad) for stamp restamping
     stripeSoftness: 0.0,   // 0 = hard stripe edge (binary); 1 = full triangular falloff
+    stripeIters:    2,     // GPU stripe iter count (Stripes-specific anchor pull)
     // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
     // shared with IDW — Stripes reuses the same controls.
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -4152,6 +4157,7 @@ function init(){
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
     stripeRad:      ['stripeRad',      'vStripeRad',      v => v.toFixed(3)],
     stripeSoftness: ['stripeSoftness', 'vStripeSoftness', v => v.toFixed(2)],
+    stripeIters:    ['stripeIters',    'vStripeIters',    v => v.toFixed(0)],
   };
   const envToggleMap = {
     lEnvFloor: 'lEnvFloor',
@@ -4213,7 +4219,7 @@ function init(){
     // IDW build params
     'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
     // Stripes build params
-    'stripeRad', 'stripeSoftness',
+    'stripeRad', 'stripeSoftness', 'stripeIters',
     // Shared envelope
     'lExt', 'cExt', 'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
     // Post-stages
@@ -4329,6 +4335,7 @@ function init(){
   // Stripes-only sliders + toggles.
   bindLutSlider('stripeRad',      'vStripeRad',      'stripeRad',      v => v.toFixed(3));
   bindLutSlider('stripeSoftness', 'vStripeSoftness', 'stripeSoftness', v => v.toFixed(2));
+  bindLutSlider('stripeIters',    'vStripeIters',    'stripeIters',    v => v.toFixed(0));
 
   function bindStripesToggle(id, key){
     const el = document.getElementById(id);
