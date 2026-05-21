@@ -93,23 +93,19 @@ The LUT bake runs entirely on the GPU:
 4. The per-pixel display shader samples `sampler3D` with hardware LINEAR
    filtering (trilinear Lab interpolation), converts back to sRGB.
 
-## Alternate algorithm: `main: stripes` (ported from main branch)
-A second LUT-build method is selectable from the `soft IDW` / `main:
-stripes` tab pair at the top of the LUT params card. `main: stripes`
-ports the original main-branch algorithm wholesale and is built on the
-CPU instead of the GPU, then uploaded to the same 3D LUT texture so the
-rest of the pipeline (per-pixel shader, hue preview, slice preview) is
-unchanged.
+## Alternate algorithm: Stripes
+A second LUT-build method is selectable from the `IDW` / `Stripes` tab
+pair at the top of the LUT params card. Stripes is built on the CPU
+and uploaded to the same 3D LUT texture, so the rest of the pipeline
+(per-pixel shader, hue preview, slice preview) is unchanged.
 
 1. **Seeds**: each palette color → an OkLab cell, stored as `(L, a, b, h, C)`.
-   Synthetic blackpoint / whitepoint anchors are skipped (the main-branch
-   algorithm doesn't use them).
+   Synthetic blackpoint / whitepoint anchors are skipped.
 2. **Voronoi by hue**: every LUT cell is initially assigned to its nearest
-   palette seed by angular hue distance and stamped with `stampLut` (clamps
-   output L to the palette's L extremes, output chroma to the per-hue
-   envelope).
+   palette seed by angular hue distance and stamped (clamps output L to the
+   palette's L extremes, output chroma to the per-hue envelope).
 3. **Stripe stamping**: cells inside a seed's hue stripe (radius
-   `mainStripeRad`, default 0.04 rad ≈ 2.3°) get their hue snapped to that
+   `stripeRad`, default 0.04 rad ≈ 2.3°) get their hue snapped to that
    seed's hue, with chroma capped at the envelope.
 4. **Iterative blur**: separable 3D Gaussian — 5-tap `(1, 4, 6, 4, 1)/16`
    on the chroma axes, 3-tap `(s, 1−2s, s)` with `s = wL/4` on the L axis
@@ -118,15 +114,22 @@ unchanged.
    gradients between anchors.
 5. **Smooth chroma envelope**: a per-hue chroma ceiling, built as
    `max over seeds of (s.C × max(0, 1 − d_hue/(4·stripeRad)))`. Optional
-   `mainEnvBoost` inflates uniformly; an optional floor lifts low-chroma
+   `stripeEnvBoost` inflates uniformly; an optional floor lifts low-chroma
    cells to the envelope rather than passing them through.
 6. **Final cosmetic blur** hides the last stamp discontinuities.
 
-The two methods produce visibly different looks: `soft IDW` blends every
-anchor with weighted-distance falloff (smooth, painterly), while `main:
-stripes` snaps each cell to its nearest anchor's hue and relies on the
-iterated blur to bridge transitions (graphical, posterised, distinct
-hue "regions").
+Stripes-only controls (visible when Stripes is selected):
+- **stripe thickness** — hue radius (rad) for the stripe stamp.
+- **chroma envelope** — `ceil` (default on) caps output chroma at the
+  per-hue envelope; `floor` (off by default) lifts low-chroma cells up
+  to the envelope.
+- **envelope boost** — inflates the envelope by −50 % to +200 %.
+
+The two methods produce visibly different looks: IDW blends every
+anchor with weighted-distance falloff (smooth, painterly); Stripes
+snaps each cell to its nearest anchor's hue and relies on the iterated
+blur to bridge transitions (graphical, posterised, distinct hue
+"regions").
 
 Build cost is roughly `O(N³ × |palette|)` GPU work. On modern hardware,
 33³ is sub-millisecond and 257³ at 256 seeds completes in a few ms.
