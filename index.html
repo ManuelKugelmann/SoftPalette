@@ -392,28 +392,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <div class="lbl"><span>stripe thickness <span style="color:var(--txdd)">hue radius (rad)</span></span><span class="v" id="vStripeRad">0.04</span></div>
         <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
       </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl">
-          <span>chroma envelope</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
-            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeEnvOn"    checked style="margin:0">ceil</label>
-            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeEnvFloor"        style="margin:0">floor</label>
-            <span class="v" id="vStripeEnvBoost">+0%</span>
-          </span>
-        </div>
-        <input type="range" id="stripeEnvBoost" min="-50" max="200" step="5" value="0">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl">
-          <span>luma envelope</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
-            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeLCeil"  checked style="margin:0">ceil</label>
-            <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="stripeLFloor" checked style="margin:0">floor</label>
-            <span class="v" id="vStripeLBoost">+0%</span>
-          </span>
-        </div>
-        <input type="range" id="stripeLBoost" min="-50" max="100" step="5" value="0">
-      </div>
+      <div class="note" style="margin-top:6px;color:var(--txdd);font-size:11px">Chroma / luma envelope: use the shared L&nbsp;env / C&nbsp;env sliders above.</div>
     </div>
 
     <div class="note" id="lutStatus" style="margin-top:6px"></div>
@@ -582,12 +561,8 @@ const state = {
     lutMethod: 'idw',
     // Stripes-method params.
     stripeRad:      0.04,  // hue radius (rad) for stamp restamping
-    stripeEnvBoost: 0,     // chroma envelope boost, %
-    stripeEnvOn:    true,  // per-hue chroma envelope ceiling
-    stripeEnvFloor: false, // per-hue chroma envelope floor
-    stripeLCeil:    true,  // global L ceiling at palette Lmax (+boost)
-    stripeLFloor:   true,  // global L floor at palette Lmin (-boost)
-    stripeLBoost:   0,     // L envelope boost, % of palette L range
+    // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
+    // shared with IDW — Stripes reuses the same controls.
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
     // step COUNTS (≤ 32). With slider at N, each anchor walks N times in
@@ -1312,8 +1287,9 @@ function idwLab(L, a, b, seeds, sigmaL, sigmaAB, softness, lRange, cRange, reach
 function ensureLutTexture(N){
   const gl = state.gl;
   if (state.lutTex && state.lutN === N) return;
-  if (state.lutTex)  gl.deleteTexture(state.lutTex);
-  if (state.lutTex2) gl.deleteTexture(state.lutTex2);
+  if (state.lutTex)    gl.deleteTexture(state.lutTex);
+  if (state.lutTex2)   gl.deleteTexture(state.lutTex2);
+  if (state.lutTexRaw) gl.deleteTexture(state.lutTexRaw);
   function alloc(){
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_3D, t);
@@ -1327,9 +1303,13 @@ function ensureLutTexture(N){
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     return t;
   }
-  state.lutTex  = alloc();
-  state.lutTex2 = alloc();
-  state.lutN    = N;
+  // lutTexRaw caches the pre-luma-look LUT. luma look is a late-stage pass
+  // that reads from lutTexRaw and writes to lutTex. Changing the lumaLook
+  // slider re-runs only that pass — no full rebuild.
+  state.lutTex     = alloc();
+  state.lutTex2    = alloc();
+  state.lutTexRaw  = alloc();
+  state.lutN       = N;
 }
 
 // One-time seed-data texture (RGBA32F, MAX_PAL × 1). rgb = Lab, a = strength.
@@ -1657,21 +1637,25 @@ function stripes_buildLut(N){
   const env = stripes_paletteEnvelope(seeds);
   // Resolve clamp values from envelope (no separate sliders in this branch
   // for main's lFloor/lCeil/cFloor/cCeil — use palette extremes directly).
-  // L envelope: bounds = [env.Lmin, env.Lmax], extended by stripeLBoost
-  // (percent of palette L-range). Toggling stripeLFloor / stripeLCeil off
-  // disables that side (clamp pushed to 0 / 1).
-  const lRange = Math.max(0, env.Lmax - env.Lmin);
-  const lBoost = (p.stripeLBoost || 0) / 100 * lRange;
-  const lFloor = p.stripeLFloor ? Math.max(0, env.Lmin - lBoost) : 0;
-  const lCeil  = p.stripeLCeil  ? Math.min(1, env.Lmax + lBoost) : 1;
+  // Shared envelope params (same controls as IDW). lExt / cExt are OkLab
+  // offsets that extend the per-hue palette envelope outward; toggles
+  // disable each side. cExt = 0 + cFloor on = "lift low chroma up to the
+  // envelope" (matches the original Stripes behavior). cExt = 0 + cCeil on
+  // = "cap chroma at the envelope" (no boost).
+  const lExt     = p.lExt || 0;
+  const cExt     = p.cExt || 0;
+  const lFloorOn = p.lEnvFloor !== false;
+  const lCeilOn  = p.lEnvCeil  !== false;
+  const cFloorOn = p.cEnvFloor !== false;
+  const cCeilOn  = p.cEnvCeil  !== false;
+  const lFloor = lFloorOn ? Math.max(0, env.Lmin - lExt) : 0;
+  const lCeil  = lCeilOn  ? Math.min(1, env.Lmax + lExt) : 1;
   const stamp_p = {lFloor, lCeil, cFloor: 0, cCeil: 0.40};
   const stripeRad = p.stripeRad;
   const iters = Math.max(1, Math.round(p.smoothness || 1));
-  const boost = 1 + (p.stripeEnvBoost || 0) / 100;
-  const envNeeded = p.stripeEnvOn || p.stripeEnvFloor;
-  const cEnvFn = envNeeded ? stripes_buildHueEnvelope(seeds, stripeRad * 4) : null;
-  const capAt   = h => (p.stripeEnvOn && cEnvFn) ? cEnvFn(h) * boost : Infinity;
-  const floorAt = h => (p.stripeEnvFloor && cEnvFn) ? cEnvFn(h) : 0;
+  const cEnvFn = stripes_buildHueEnvelope(seeds, stripeRad * 4);
+  const capAt   = h => cCeilOn  ? cEnvFn(h) + cExt              : Infinity;
+  const floorAt = h => cFloorOn ? Math.max(0, cEnvFn(h) - cExt) : 0;
 
   const cellL  = idx => idx / (N - 1);
   const cellAB = idx => -LUT_AB_RANGE + (idx / (N - 1)) * (2 * LUT_AB_RANGE);
@@ -1740,8 +1724,52 @@ function stripes_uploadLut(data, N){
     rgba[o+2] = data[j+2];
     rgba[o+3] = 1.0;
   }
-  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTexRaw);
   gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, N, N, N, gl.RGBA, gl.FLOAT, rgba);
+}
+
+// Late-stage luma-look pass over the cached raw LUT (state.lutTexRaw).
+// Reads each cell, rotates (a, b) toward the L-conditional mean hue, writes
+// to state.lutTex. Re-runnable when only the lumaLook slider changes — no
+// rebuild. uLumaLook = 0 makes the pass a pure copy.
+function applyLumaLookPass(){
+  if (!state.lutTexRaw || !state.lutTex) return;
+  const gl = state.gl;
+  const N  = state.lutN;
+  const prog = state.programs.lutLumalook;
+  gl.useProgram(prog);
+  gl.bindVertexArray(state.vao);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTexRaw);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLutRaw'), 1);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, state.lumaTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLumaCurve'), 2);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLumaLook'), state.params.lumaLook || 0);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uN'), N);
+  const uZ = gl.getUniformLocation(prog, 'uZ');
+  if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
+  gl.viewport(0, 0, N, N);
+  for (let z = 0; z < N; z++){
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTex, 0, z);
+    gl.uniform1f(uZ, z);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+// LumaLook is a late-stage cell rotation — changing it just re-runs the
+// pass, no LUT rebuild. requestAnimationFrame coalesces rapid slider drag.
+function scheduleLumaLookRefresh(){
+  if (state.rafPendingLook) return;
+  state.rafPendingLook = true;
+  requestAnimationFrame(() => {
+    state.rafPendingLook = false;
+    applyLumaLookPass();
+    renderHuePreview();
+    requestRender();
+  });
 }
 
 function recomputeLut(){
@@ -1772,6 +1800,7 @@ function recomputeLut(){
   if (state.params.lutMethod === 'stripes'){
     const data = stripes_buildLut(N);
     if (data) stripes_uploadLut(data, N);
+    applyLumaLookPass();
     state.lutBuildMs = performance.now() - t0;
     updateLutStatus();
     renderHuePreview();
@@ -1802,11 +1831,6 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uCEnvFloor'), state.params.cEnvFloor ? 1 : 0);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCEnvCeil'),  state.params.cEnvCeil  ? 1 : 0);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
-  // Bind luma-curve texture (unit 2). LINEAR sampling gives smooth L→(a,b).
-  gl.activeTexture(gl.TEXTURE2);
-  gl.bindTexture(gl.TEXTURE_2D, state.lumaTex);
-  gl.uniform1i(gl.getUniformLocation(prog, 'uLumaCurve'), 2);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLumaLook'), state.params.lumaLook);
   // Bind hue→(L_lo, L_hi, C_lo, C_hi) curve (unit 3). REPEAT wrap closes the
   // hue ring so the sample is continuous at 0°/360°.
   gl.activeTexture(gl.TEXTURE3);
@@ -1867,11 +1891,19 @@ function recomputeLut(){
     state.lutTex2 = dst;
   }
 
-  // Final stamp: ensures the LUT the per-pixel shader samples has seed cells
-  // at their precise Lab even when smoothness=0 (in which case the loop above
-  // never ran, so only the initial stamp guaranteed it; this is a no-op in
-  // that case since the cells already hold the stamped values).
+  // Final stamp: ensures the LUT cells the late luma-look pass reads from
+  // have seed cells at their precise Lab even when smoothness=0.
   stampAnchors(state.lutTex, N, seeds);
+
+  // Move the raw (pre-luma-look) bake result into state.lutTexRaw, then run
+  // the late-stage luma-look pass which writes the final output into
+  // state.lutTex (the texture sampled by the per-pixel shader). Caching the
+  // raw result means changing only the lumaLook slider re-runs that single
+  // pass — no full rebuild.
+  const tmpLut    = state.lutTex;
+  state.lutTex    = state.lutTexRaw;
+  state.lutTexRaw = tmpLut;
+  applyLumaLookPass();
 
   // Restore default framebuffer / viewport.
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1881,7 +1913,7 @@ function recomputeLut(){
   updateLutStatus();
   updateExtendStatus();
   renderHuePreview();
-  renderSwatches();  // reflect updated synth seeds in the chip grid
+  renderSwatches();
 }
 
 function updateLutStatus(){
@@ -1994,8 +2026,6 @@ uniform float uLEnvCeil;      // 1 = clamp lab.x to envLHi + uLExt; 0 = no upper
 uniform float uCEnvFloor;     // 1 = clamp outC to envCLo - uCExt; 0 = no lower C clamp
 uniform float uCEnvCeil;      // 1 = clamp outC to envCHi + uCExt; 0 = no upper C clamp
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
-uniform sampler2D uLumaCurve; // 16×1 RGBA32F: rg = palette mean (a, b) at L
-uniform float uLumaLook;      // 0 = no shift; 1 = full pre-shift to L-mean hue
 uniform sampler2D uHueLCCurve;// 32×1 RGBA32F: rgba = (L_lo, L_hi, C_lo, C_hi) at hue
 
 // Soft min/max: smooth analytic alternatives to min()/max() so the envelope
@@ -2012,18 +2042,6 @@ void main(){
   float L = li / (N - 1.0);
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
-
-  // Luma-look: read the palette's L-conditional expected direction (curve)
-  // at this cell's L. midWeight scales how strongly the curve influences
-  // anchor selection — zero at midtones (so e.g. skin tones at L≈0.5 stay
-  // near their input hue) and full strength at the L extremes (so shadows
-  // and highlights pick up the dark/light tints).
-  vec2 expected = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
-  float expC    = length(expected);
-  // Plateau midWeight: 0.2 at L=0.5 (some midtone effect, not zero, so the
-  // transition isn't abrupt), 1.0 at L=0 and L=1 (full curve influence).
-  float midWeight = 0.2 + 0.8 * abs(L - 0.5) * 2.0;
-  float lookStrength = uLumaLook * midWeight;
 
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
@@ -2051,21 +2069,13 @@ void main(){
     dmin2_iso = min(dmin2_iso, dL*dL + dA*dA + dB*dB);
   }
 
-  // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma.
-  // The "gate direction" used for the hue hemisphere test blends from the
-  // cell's own (a, b) at lumaLook=0 to the palette's L-conditional curve
-  // direction at lumaLook=1. So at high lumaLook the gate follows the
-  // light/dark ramp (cool shadows / warm highlights for teal-orange) and
-  // doesn't accidentally exclude the cool anchors when the input pixel
-  // happens to be warm at a cool-L position.
-  //
-  //   (a) Soft hue gate vs gateDir — smoothstep around 0 (no hard cliff at
-  //       exactly 90°) so anchors near the hemisphere boundary fade smoothly.
-  //   (b) Luma-look alignment bonus — anchors aligned with the curve get
-  //       boosted weight; anchors pointing away get suppressed. Palette
-  //       still drives the output; luma look just biases which anchors
-  //       carry weight at each L. Influence, not override.
-  vec2 gateDir = mix(vec2(a, b), expected, lookStrength);
+  // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma. Hue
+  // hemisphere gate uses the cell's own (a, b) direction so we don't bring
+  // in opposite-hue anchors with non-trivial weight (which would otherwise
+  // pull the result toward grey or a confidently-wrong hue). Luma look is
+  // applied later as a late-stage cell rotation, so it does NOT influence
+  // anchor weighting here.
+  vec2 gateDir = vec2(a, b);
   float gateC2 = gateDir.x*gateDir.x + gateDir.y*gateDir.y;
   float sumW   = 1e-12;
   vec3  sumLab = vec3(0.0);
@@ -2080,21 +2090,9 @@ void main(){
     float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     float w  = pow(r2, -halfP) * s.w;
     float ancC2 = s.y*s.y + s.z*s.z;
-    // (a) Soft hue gate against blended cell/curve direction. Smoothstep
-    // range widened to (-0.5, 0.5) so anchors at hue differences near 90°
-    // fade gradually rather than snapping in/out.
     if (gateC2 > 1e-6 && ancC2 > 1e-6){
       float cos_dh = (gateDir.x*s.y + gateDir.y*s.z) / sqrt(gateC2 * ancC2);
       w *= smoothstep(-0.5, 0.5, cos_dh);
-    }
-    // (b) Luma-look alignment bonus toward the curve direction. Bonus has a
-    // FLOOR so opposite-aligned anchors still contribute ~40% at max
-    // lumaLook — that's the "more blend, less hard switch" the user wants.
-    //   bonus = 0.7 + 0.3 * dotE → range [0.4, 1.0]
-    if (lookStrength > 1e-4 && expC > 1e-6 && ancC2 > 1e-6){
-      float dotE = (expected.x*s.y + expected.y*s.z) / (expC * sqrt(ancC2));
-      float bonus = 0.7 + 0.3 * dotE;
-      w *= mix(1.0, bonus, lookStrength);
     }
     sumW   += w;
     sumLab += w * s.xyz;
@@ -2241,6 +2239,36 @@ void main(){
 // at a fixed L plane, mapping vUV.x → a and vUV.y → b. Matches whatever the
 // per-pixel shader would sample for an input pixel at this (L, a, b), so the
 // slice is a true cross-section of the final LUT.
+// Late-stage luma-look pass over the baked LUT. One fragment per (a, b) cell
+// of the current L-slice. Reads the cached pre-luma-look value from
+// state.lutTexRaw and rotates (a, b) toward the palette's L-conditional mean
+// hue (uLumaCurve sample at the cell's L), with midWeight ramping the
+// effect up at L extremes. Caches the bake so changing the lumaLook slider
+// only re-runs this pass — no rebuild.
+const FS_LUT_LUMALOOK = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+out vec4 fragColor;
+uniform sampler3D uLutRaw;
+uniform sampler2D uLumaCurve;
+uniform float uLumaLook;
+uniform float uN;
+uniform float uZ;
+void main(){
+  float N    = uN;
+  float ai   = floor(gl_FragCoord.x);
+  float bi   = floor(gl_FragCoord.y);
+  vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
+  vec3  lab  = texture(uLutRaw, uvw).rgb;
+  if (uLumaLook > 0.0){
+    float L = uZ / max(N - 1.0, 1.0);
+    vec2 expected   = texture(uLumaCurve, vec2(clamp(L, 0.0, 1.0), 0.5)).rg;
+    float midWeight = 0.2 + 0.8 * abs(L - 0.5) * 2.0;
+    lab.yz = mix(lab.yz, expected, uLumaLook * midWeight);
+  }
+  fragColor = vec4(lab, 1.0);
+}`;
+
 const FS_LUT_SLICE = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -2303,7 +2331,8 @@ function initGL(){
   state.programs.lutBuild = program(VS, FS_LUT_BUILD);
   state.programs.lutBlur  = program(VS, FS_LUT_BLUR);
   state.programs.lutStamp = program(VS, FS_LUT_STAMP);
-  state.programs.lutSlice = program(VS, FS_LUT_SLICE);
+  state.programs.lutSlice    = program(VS, FS_LUT_SLICE);
+  state.programs.lutLumalook = program(VS, FS_LUT_LUMALOOK);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -3848,7 +3877,18 @@ function init(){
   })();
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('cRange',     'vCRange',     'cRange',     v => v.toFixed(2));
-  bindLutSlider('lumaLook',   'vLumaLook',   'lumaLook',   v => v.toFixed(2));
+  (function bindLumaLookSlider(){
+    const inp = document.getElementById('lumaLook');
+    const lbl = document.getElementById('vLumaLook');
+    if (!inp || !lbl) return;
+    inp.value = state.params.lumaLook;
+    lbl.textContent = state.params.lumaLook.toFixed(2);
+    inp.addEventListener('input', () => {
+      state.params.lumaLook = parseFloat(inp.value);
+      lbl.textContent = state.params.lumaLook.toFixed(2);
+      scheduleLumaLookRefresh();
+    });
+  })();
   bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
   bindLutSlider('lExt',       'vLExt',       'lExt',       v => v.toFixed(2));
   bindLutSlider('cExt',       'vCExt',       'cExt',       v => v.toFixed(3));
@@ -3882,15 +3922,24 @@ function init(){
     });
   })();
 
-  // Five named operating points along the soft↔hard axis. The hue-based
-  // envelope + softMax/softMin clamp smooths what used to be hard step
-  // rings on the tight 'hard' preset, so cExt=0.06 / lExt=0.20 work again.
-  const lutPresets = {
-    'wash':      { lTol: 0.8,  abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
-    'soft':      { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 0.85, cExt: 0.32, smoothness: 2, lumaLook: 0.35 },
-    'balanced':  { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 0.70, cExt: 0.28, smoothness: 2, lumaLook: 0.25 },
-    'vivid':     { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 0.55, cExt: 0.25, smoothness: 2, lumaLook: 0.10 },
-    'hard':      { lTol: 0.40, abTol: 0.15, softness: 5.0,  lRange: 1.0, cRange: 0.55, reach: 0.28, lExt: 0.55, cExt: 0.22, smoothness: 2, lumaLook: 0.30 },
+  // Per-method presets. Same five names ('wash' … 'hard') but different
+  // param tunings under IDW vs Stripes. applyLutPreset reads the dict for
+  // the currently selected method.
+  const lutPresetsByMethod = {
+    idw: {
+      'wash':     { lTol: 0.8,  abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
+      'soft':     { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 0.85, cExt: 0.32, smoothness: 2, lumaLook: 0.35 },
+      'balanced': { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 0.70, cExt: 0.28, smoothness: 2, lumaLook: 0.25 },
+      'vivid':    { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 0.55, cExt: 0.25, smoothness: 2, lumaLook: 0.10 },
+      'hard':     { lTol: 0.40, abTol: 0.15, softness: 5.0,  lRange: 1.0, cRange: 0.55, reach: 0.28, lExt: 0.55, cExt: 0.22, smoothness: 2, lumaLook: 0.30 },
+    },
+    stripes: {
+      'wash':     { stripeRad: 0.30, lExt: 0.50, cExt: 0.25, smoothness: 6, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
+      'soft':     { stripeRad: 0.15, lExt: 0.30, cExt: 0.15, smoothness: 4, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
+      'balanced': { stripeRad: 0.08, lExt: 0.20, cExt: 0.10, smoothness: 3, lumaLook: 0.25, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
+      'vivid':    { stripeRad: 0.04, lExt: 0.10, cExt: 0.05, smoothness: 2, lumaLook: 0.15, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
+      'hard':     { stripeRad: 0.02, lExt: 0.05, cExt: 0.02, smoothness: 1, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: true,  cEnvCeil: true },
+    },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
@@ -3902,19 +3951,38 @@ function init(){
     cExt:       ['cExt',       'vCExt',       v => v.toFixed(3)],
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
+    stripeRad:  ['stripeRad',  'vStripeRad',  v => v.toFixed(3)],
+  };
+  const envToggleMap = {
+    lEnvFloor: 'lEnvFloor',
+    lEnvCeil:  'lEnvCeil',
+    cEnvFloor: 'cEnvFloor',
+    cEnvCeil:  'cEnvCeil',
   };
   function applyLutPreset(name){
-    const p = lutPresets[name];
+    const presets = lutPresetsByMethod[state.params.lutMethod] || lutPresetsByMethod.idw;
+    const p = presets[name];
     if (!p) return;
     Object.assign(state.params, p);
     for (const [k, [inp, lbl, fmt]] of Object.entries(sliderMap)){
-      document.getElementById(inp).value = state.params[k];
-      document.getElementById(lbl).textContent = fmt(state.params[k]);
+      if (state.params[k] === undefined) continue;
+      const inpEl = document.getElementById(inp), lblEl = document.getElementById(lbl);
+      if (!inpEl || !lblEl) continue;
+      inpEl.value = state.params[k];
+      lblEl.textContent = fmt(state.params[k]);
     }
-    // Softness: invert (slider position = 13 − IDW exponent).
-    const sftSlider = 13 - state.params.softness;
-    document.getElementById('softness').value = sftSlider.toFixed(1);
-    document.getElementById('vSoftness').textContent = sftSlider.toFixed(1);
+    // Softness slider inverts (slider = 13 − exponent).
+    if (state.params.softness !== undefined){
+      const sftSlider = 13 - state.params.softness;
+      const sftEl = document.getElementById('softness'), sftLbl = document.getElementById('vSoftness');
+      if (sftEl)  sftEl.value = sftSlider.toFixed(1);
+      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(1);
+    }
+    for (const [k, id] of Object.entries(envToggleMap)){
+      if (state.params[k] === undefined) continue;
+      const el = document.getElementById(id);
+      if (el) el.checked = !!state.params[k];
+    }
     scheduleLutRebuild();
   }
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
@@ -3937,19 +4005,7 @@ function init(){
   refreshLutMethodBtns();
   // Stripes-only sliders + toggles.
   bindLutSlider('stripeRad',      'vStripeRad',      'stripeRad',      v => v.toFixed(3));
-  (function(){
-    const inp = document.getElementById('stripeEnvBoost');
-    const lbl = document.getElementById('vStripeEnvBoost');
-    if (!inp || !lbl) return;
-    inp.value = state.params.stripeEnvBoost;
-    lbl.textContent = (state.params.stripeEnvBoost >= 0 ? '+' : '') + state.params.stripeEnvBoost + '%';
-    inp.addEventListener('input', () => {
-      const v = parseFloat(inp.value);
-      state.params.stripeEnvBoost = v;
-      lbl.textContent = (v >= 0 ? '+' : '') + v + '%';
-      scheduleLutRebuild();
-    });
-  })();
+
   function bindStripesToggle(id, key){
     const el = document.getElementById(id);
     if (!el) return;
@@ -3959,23 +4015,7 @@ function init(){
       scheduleLutRebuild();
     });
   }
-  bindStripesToggle('stripeEnvOn',    'stripeEnvOn');
-  bindStripesToggle('stripeEnvFloor', 'stripeEnvFloor');
-  bindStripesToggle('stripeLCeil',    'stripeLCeil');
-  bindStripesToggle('stripeLFloor',   'stripeLFloor');
-  (function(){
-    const inp = document.getElementById('stripeLBoost');
-    const lbl = document.getElementById('vStripeLBoost');
-    if (!inp || !lbl) return;
-    inp.value = state.params.stripeLBoost;
-    lbl.textContent = (state.params.stripeLBoost >= 0 ? '+' : '') + state.params.stripeLBoost + '%';
-    inp.addEventListener('input', () => {
-      const v = parseFloat(inp.value);
-      state.params.stripeLBoost = v;
-      lbl.textContent = (v >= 0 ? '+' : '') + v + '%';
-      scheduleLutRebuild();
-    });
-  })();
+
 
   // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
   // Slider == 0 disables that axis. Number of inserts per gap is automatic
