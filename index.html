@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:19:10Z">
+<meta name="build" content="2026-05-21T10:23:22Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:19:10Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:23:22Z</span>
   </div>
 </header>
 
@@ -360,6 +360,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>stripe thickness</span><span class="v" id="vStripeRad">0.04</span></div>
         <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>stripe softness</span><span class="v" id="vStripeSoftness">0.00</span></div>
+        <input type="range" id="stripeSoftness" min="0" max="1" step="0.01" value="0.0">
       </div>
     </div>
 
@@ -597,6 +601,7 @@ const state = {
     lutMethod: 'idw',
     // Stripes-method params.
     stripeRad:      0.04,  // hue radius (rad) for stamp restamping
+    stripeSoftness: 0.0,   // 0 = hard stripe edge (binary); 1 = full triangular falloff
     // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
     // shared with IDW — Stripes reuses the same controls.
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -1713,7 +1718,8 @@ function stripes_buildLut(N){
   const lFloor = lFloorOn ? Math.max(0, env.Lmin - lExt) : 0;
   const lCeil  = lCeilOn  ? Math.min(1, env.Lmax + lExt) : 1;
   const stamp_p = {lFloor, lCeil, cFloor: 0, cCeil: 0.40};
-  const stripeRad = p.stripeRad;
+  const stripeRad      = p.stripeRad;
+  const stripeSoftness = Math.max(0, Math.min(1, p.stripeSoftness || 0));
   // debugBlur off → skip the iter loop (just the initial Voronoi fill).
   const iters = p.debugBlur !== false ? Math.max(1, Math.round(p.smoothness || 1)) : 0;
   const cEnvFn = stripes_buildHueEnvelope(seeds, stripeRad * 4);
@@ -1766,9 +1772,21 @@ function stripes_buildLut(N){
             if (d < bestD){ bestD = d; best = s; }
           }
           if (best){
-            const out = stripes_stampLut(L_cell, C_cell, best.h, best.L, best.C, floorAt(best.h), capAt(best.h), stamp_p, p.lRange, p.cRange);
-            const idx = ((li*N + bi)*N + ai)*3;
-            data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
+            // Soft stripe: stamp blend weight = 1 inside (1−softness)·stripeRad,
+            // then linear falloff to 0 at stripeRad. softness=0 → hard binary
+            // stamp (current behavior); softness=1 → full triangular falloff.
+            const t = bestD / stripeRad;
+            const kneeStart = 1 - stripeSoftness;
+            const w = t < kneeStart
+              ? 1
+              : Math.max(0, 1 - (t - kneeStart) / Math.max(1e-6, 1 - kneeStart));
+            if (w > 1e-6){
+              const out = stripes_stampLut(L_cell, C_cell, best.h, best.L, best.C, floorAt(best.h), capAt(best.h), stamp_p, p.lRange, p.cRange);
+              const idx = ((li*N + bi)*N + ai)*3;
+              data[idx  ] = data[idx  ] * (1 - w) + out[0] * w;
+              data[idx+1] = data[idx+1] * (1 - w) + out[1] * w;
+              data[idx+2] = data[idx+2] * (1 - w) + out[2] * w;
+            }
           }
         }
       }
@@ -4060,7 +4078,8 @@ function init(){
     cExt:       ['cExt',       'vCExt',       v => v.toFixed(3)],
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
-    stripeRad:  ['stripeRad',  'vStripeRad',  v => v.toFixed(3)],
+    stripeRad:      ['stripeRad',      'vStripeRad',      v => v.toFixed(3)],
+    stripeSoftness: ['stripeSoftness', 'vStripeSoftness', v => v.toFixed(2)],
   };
   const envToggleMap = {
     lEnvFloor: 'lEnvFloor',
@@ -4122,7 +4141,7 @@ function init(){
     // IDW build params
     'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
     // Stripes build params
-    'stripeRad',
+    'stripeRad', 'stripeSoftness',
     // Shared envelope
     'lExt', 'cExt', 'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
     // Post-stages
@@ -4237,6 +4256,7 @@ function init(){
   refreshLutMethodBtns();
   // Stripes-only sliders + toggles.
   bindLutSlider('stripeRad',      'vStripeRad',      'stripeRad',      v => v.toFixed(3));
+  bindLutSlider('stripeSoftness', 'vStripeSoftness', 'stripeSoftness', v => v.toFixed(2));
 
   function bindStripesToggle(id, key){
     const el = document.getElementById(id);
