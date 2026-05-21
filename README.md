@@ -6,7 +6,7 @@ construction.
 
 ## Try it
 - **Live (GitHub Pages, main branch)**: <https://manuelkugelmann.github.io/SoftPalette/>
-- **Latest main commit (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/main/index.html>
+- **This branch (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
 
 ## Usage
 - Drop an image.
