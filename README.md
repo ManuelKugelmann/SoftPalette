@@ -24,9 +24,7 @@ construction.
 - Explore how a palette feels in continuous tone.
 
 ## Controls
-| Section | What it does |
-|---|---|
-### Shared (both methods)
+
 | Control | What it does |
 |---|---|
 | **image** | Drop, paste (Ctrl+V), click to browse, or pick a built-in test image |
@@ -39,7 +37,7 @@ construction.
 | **smoothness** | Post-build Gaussian blur iterations (IDW: 3D blur on the baked LUT; Stripes: blur + restamp loop count) |
 | **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
 
-### IDW only
+### IDW
 | Control | What it does |
 |---|---|
 | **L tolerance (σ_L)** | Anchor's pull radius along the L axis. Small = tight luminance "stripe", large = anchor reaches across the L range |
@@ -50,43 +48,24 @@ construction.
 | **L env ± / C env ±** (with `floor` / `ceil` toggles) | Per-hue envelope half-width. Bounds come from a Gaussian-weighted soft-min/soft-max of palette anchor L (and C) within the local hue radius. Output is hard-clamped to `[envLLo − lExt, envLHi + lExt]` and analogously for chroma. The `floor` / `ceil` toggles disable that side individually |
 | **luma look** | L→hue bias. 0 = off; 1 = pre-shift each cell's (a, b) fully toward the palette's L-conditional mean hue. Captures the teal-orange-style "cool shadows, warm highlights" automatically from the palette's L→(a,b) profile |
 
-### Stripes only
+### Stripes
 | Control | What it does |
 |---|---|
 | **stripe thickness** | Hue radius (rad) for the stripe stamp pass. Cells within this angular distance of a seed's hue get hue-snapped to that seed |
 | **chroma envelope** (`ceil` / `floor` + boost) | `ceil` caps stamped chroma at the per-hue palette envelope; `floor` lifts low-chroma cells up to the envelope. Boost inflates the envelope by −50 % … +200 % of the palette's natural per-hue chroma |
 | **luma envelope** (`ceil` / `floor` + boost) | `ceil` clamps output L at the palette's max L; `floor` clamps at min L. Boost extends the bounds by −50 % … +100 % of the palette's L range |
 
-## Algorithm
-**Chroma-preserving soft 3D Voronoi in OkLab via scale-free Shepard IDW.**
+## Algorithm: IDW
 
-For every LUT cell at OkLab `(L, a, b)`:
-
-```
-d_i²    = ((L − s_i.L) / σ_L)² + ((a − s_i.a) / σ_ab)² + ((b − s_i.b) / σ_ab)²
-d_min²  = min_i d_i²
-w_i     = (d_i² / d_min²)^(−softness/2) · s_i.strength
-sumLab  = Σ w_i · s_i.Lab  /  Σ w_i        (Cartesian Lab average)
-C_avg   = Σ w_i · |s_i.ab| /  Σ w_i        (weighted source chroma)
-coh     = |sumLab.ab| / C_avg              (∈ [0, 1] — anchor agreement on hue)
-anchorMag = mix(|sumLab.ab|, C_avg, coh)   (chroma-preserving rescale magnitude)
-out.|ab| = mix(anchorMag, |cell.ab|, cRange)   (blend back toward input chroma)
-out.ab   = sumLab.ab direction × out.|ab|
-out.L    = mix(sumLab.L,  cell.L, lRange)      (blend back toward input lightness)
-```
-
-Then optionally `smoothness` iterations of separable 3D Gaussian blur on the
-LUT (also chroma-preserving, same coherence trick applied per blur tap).
-
-- **L and ab tolerances** (`σ_L`, `σ_ab`) shape an anisotropic ellipsoid
-  around each anchor. They are *the* "stripe" — bounded in luminance AND
-  saturation, not just hue.
-- **Softness** is the IDW exponent. Low values give smooth interpolation
+- **IDW**: Chroma-preserving soft 3D Voronoi in OkLab via scale-free Shepard IDW.
+  **Softness** is the IDW exponent. Low values give smooth interpolation
   between anchors (3D voronoi blending); high values give hard nearest-
   neighbor quantization (sharp voronoi cells with no gradient between).
   Operates on the *ratio* `d² / d_min²` so transition behavior is
   scale-free — a `softness=4` produces the same fractional transition
   width whether anchors are 0.05 or 0.5 apart in Lab.
+  **L and ab tolerances** (`σ_L`, `σ_ab`) shape an anisotropic ellipsoid
+  around each anchor.
 - **Chroma preservation** rescales the blended (a, b) magnitude toward
   the weighted-average source chroma, but only as far as anchors *agree*
   on hue (coherence ∈ [0, 1]). High coherence → full chroma boost (no
@@ -96,58 +75,32 @@ LUT (also chroma-preserving, same coherence trick applied per blur tap).
 - **Smoothness** post-blur runs separable 3D Gaussian iterations on the
   finished LUT — pairs well with high softness for "saturated regions
   with soft edges."
-- **Extends to the cube borders for free**: at the far corners of OkLab
+- **Extends to the cube borders**: at the far corners of OkLab
   space, the closest anchor dominates the weighted sum, so cells inherit
   its color cleanly. No hue gaps need patching, no "missing hue collapses
   to grey" failure mode.
 
-### Implementation
-The LUT bake runs entirely on the GPU:
-1. Palette seeds packed into a 1×256 RGBA32F sampler.
-2. A 3D LUT (RGBA16F, `N×N×N`) is allocated as `TEXTURE_3D`.
-3. One fragment-shader pass per L-slice: the build shader loops over all
-   active seeds, accumulates the Shepard-weighted Lab blend, writes one
-   `(a, b)` plane via `framebufferTextureLayer`. `N` passes total.
-4. The per-pixel display shader samples `sampler3D` with hardware LINEAR
-   filtering (trilinear Lab interpolation), converts back to sRGB.
+## Algorithm: Stripes
 
-## Alternate algorithm: Stripes
-A second LUT-build method is selectable from the `IDW` / `Stripes` tab
-pair at the top of the LUT params card. Stripes is built on the CPU
-and uploaded to the same 3D LUT texture, so the rest of the pipeline
-(per-pixel shader, hue preview, slice preview) is unchanged.
-
-1. **Seeds**: each palette color → an OkLab cell, stored as `(L, a, b, h, C)`.
+-  **Seeds**: each palette color → an OkLab cell, stored as `(L, a, b, h, C)`.
    Synthetic blackpoint / whitepoint anchors are skipped.
-2. **Voronoi by hue**: every LUT cell is initially assigned to its nearest
+-  **Voronoi by hue**: every LUT cell is initially assigned to its nearest
    palette seed by angular hue distance and stamped (clamps output L to the
    palette's L extremes, output chroma to the per-hue envelope).
-3. **Stripe stamping**: cells inside a seed's hue stripe (radius
+-  *Stripe stamping**: cells inside a seed's hue stripe (radius
    `stripeRad`, default 0.04 rad ≈ 2.3°) get their hue snapped to that
    seed's hue, with chroma capped at the envelope.
-4. **Iterative blur**: separable 3D Gaussian — 5-tap `(1, 4, 6, 4, 1)/16`
+-  **Iterative blur**: separable 3D Gaussian — 5-tap `(1, 4, 6, 4, 1)/16`
    on the chroma axes, 3-tap `(s, 1−2s, s)` with `s = wL/4` on the L axis
    (anisotropic: chroma blurs more than lightness). Followed by re-stamping
    stripe cells. Repeats `smoothness` times. This is what produces smooth
    gradients between anchors.
-5. **Smooth chroma envelope**: a per-hue chroma ceiling, built as
+-  **Smooth chroma envelope**: a per-hue chroma ceiling, built as
    `max over seeds of (s.C × max(0, 1 − d_hue/(4·stripeRad)))`. Optional
    `stripeEnvBoost` inflates uniformly; an optional floor lifts low-chroma
    cells to the envelope rather than passing them through.
-6. **Final cosmetic blur** hides the last stamp discontinuities.
+-  **Final cosmetic blur** hides the last stamp discontinuities.
 
-Stripes-only controls (visible when Stripes is selected):
-- **stripe thickness** — hue radius (rad) for the stripe stamp.
-- **chroma envelope** — `ceil` (default on) caps output chroma at the
-  per-hue envelope; `floor` (off by default) lifts low-chroma cells up
-  to the envelope.
-- **envelope boost** — inflates the envelope by −50 % to +200 %.
 
-The two methods produce visibly different looks: IDW blends every
-anchor with weighted-distance falloff (smooth, painterly); Stripes
-snaps each cell to its nearest anchor's hue and relies on the iterated
-blur to bridge transitions (graphical, posterised, distinct hue
-"regions").
 
-Build cost is roughly `O(N³ × |palette|)` GPU work. On modern hardware,
-33³ is sub-millisecond and 257³ at 256 seeds completes in a few ms.
+
