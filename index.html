@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:31:20Z">
+<meta name="build" content="2026-05-21T09:33:59Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -223,7 +223,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:31:20Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:33:59Z</span>
   </div>
 </header>
 
@@ -4004,20 +4004,27 @@ function init(){
   // Per-method presets. Same five names ('wash' … 'hard') but different
   // param tunings under IDW vs Stripes. applyLutPreset reads the dict for
   // the currently selected method.
+  // Preset sweep:
+  //   wash      = infer FULL LUT from palette  — broad extrapolation,
+  //               image structure preserved (lRange / cRange high), wide
+  //               envelope, heavy smooth blur fills the cube smoothly.
+  //   hard      = close to palette              — snap to palette colors,
+  //               lRange/cRange ≈ 0, tight envelope, near-Voronoi softness.
+  // Soft / balanced / vivid step between the two ends.
   const lutPresetsByMethod = {
     idw: {
-      'wash':     { lTol: 0.8,  abTol: 0.30, softness: 1.5,  lRange: 1.0, cRange: 0.10, reach: 0.25, lExt: 1.0,  cExt: 0.40, smoothness: 2, lumaLook: 0.30 },
-      'soft':     { lTol: 0.7,  abTol: 0.30, softness: 2.0,  lRange: 1.0, cRange: 0.65, reach: 0.30, lExt: 0.85, cExt: 0.32, smoothness: 2, lumaLook: 0.35 },
-      'balanced': { lTol: 0.5,  abTol: 0.20, softness: 4.0,  lRange: 1.0, cRange: 0.50, reach: 0.25, lExt: 0.70, cExt: 0.28, smoothness: 2, lumaLook: 0.25 },
-      'vivid':    { lTol: 0.3,  abTol: 0.08, softness: 2.0,  lRange: 1.0, cRange: 0.80, reach: 0.35, lExt: 0.55, cExt: 0.25, smoothness: 2, lumaLook: 0.10 },
-      'hard':     { lTol: 0.40, abTol: 0.15, softness: 5.0,  lRange: 1.0, cRange: 0.55, reach: 0.28, lExt: 0.55, cExt: 0.22, smoothness: 2, lumaLook: 0.30 },
+      'wash':     { lTol: 0.9,  abTol: 0.30, softness: 1.2, lRange: 1.00, cRange: 0.80, reach: 0.50, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40 },
+      'soft':     { lTol: 0.7,  abTol: 0.25, softness: 2.0, lRange: 0.80, cRange: 0.55, reach: 0.35, lExt: 0.85, cExt: 0.32, smoothness: 4, lumaLook: 0.30 },
+      'balanced': { lTol: 0.5,  abTol: 0.18, softness: 3.5, lRange: 0.50, cRange: 0.40, reach: 0.30, lExt: 0.60, cExt: 0.22, smoothness: 3, lumaLook: 0.25 },
+      'vivid':    { lTol: 0.35, abTol: 0.10, softness: 5.0, lRange: 0.25, cRange: 0.20, reach: 0.30, lExt: 0.40, cExt: 0.15, smoothness: 2, lumaLook: 0.20 },
+      'hard':     { lTol: 0.25, abTol: 0.07, softness: 8.0, lRange: 0.00, cRange: 0.00, reach: 0.40, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30 },
     },
     stripes: {
-      'wash':     { stripeRad: 0.30, lExt: 0.50, cExt: 0.25, smoothness: 6, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
-      'soft':     { stripeRad: 0.15, lExt: 0.30, cExt: 0.15, smoothness: 4, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
-      'balanced': { stripeRad: 0.08, lExt: 0.20, cExt: 0.10, smoothness: 3, lumaLook: 0.25, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
-      'vivid':    { stripeRad: 0.04, lExt: 0.10, cExt: 0.05, smoothness: 2, lumaLook: 0.15, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: false, cEnvCeil: true },
-      'hard':     { stripeRad: 0.02, lExt: 0.10, cExt: 0.02, smoothness: 1, lumaLook: 0.30, lEnvFloor: true,  lEnvCeil: true,  cEnvFloor: true,  cEnvCeil: true },
+      'wash':     { stripeRad: 0.50, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'soft':     { stripeRad: 0.25, lExt: 0.85, cExt: 0.30, smoothness: 4, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'balanced': { stripeRad: 0.10, lExt: 0.60, cExt: 0.20, smoothness: 3, lumaLook: 0.25, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'vivid':    { stripeRad: 0.05, lExt: 0.40, cExt: 0.10, smoothness: 2, lumaLook: 0.20, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'hard':     { stripeRad: 0.02, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: true,  cEnvCeil: true },
     },
   };
   const sliderMap = {
