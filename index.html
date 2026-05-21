@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:21:34Z">
+<meta name="build" content="2026-05-21T09:23:42Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -223,7 +223,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:21:34Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:23:42Z</span>
   </div>
 </header>
 
@@ -322,6 +322,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
       <button data-lutpreset="vivid"     title="Sharp hue separation, wide L acceptance">vivid</button>
       <button data-lutpreset="hard"      title="Near-Voronoi snap — palette colors only, soft seams">hard</button>
+    </div>
+    <div class="row full" style="margin-bottom:8px;display:flex;gap:4px">
+      <button id="copyPreset"   style="flex:1" title="Copy current params to clipboard as a JSON preset">copy preset</button>
+      <button id="loadPreset"   style="flex:1" title="Paste a previously-copied JSON preset (or any subset of params) to apply">load preset</button>
     </div>
     <div class="slider">
       <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
@@ -4062,6 +4066,109 @@ function init(){
   }
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
     btn.addEventListener('click', () => applyLutPreset(btn.dataset.lutpreset));
+  });
+
+  // Copy/load custom presets: serialize the LUT-relevant subset of
+  // state.params to a JSON blob. Lets users save a tuned look, share it,
+  // or restore it across reloads (browser doesn't persist state).
+  const PRESET_KEYS = [
+    'lutMethod', 'lutSize',
+    // IDW build params
+    'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
+    // Stripes build params
+    'stripeRad',
+    // Shared envelope
+    'lExt', 'cExt', 'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
+    // Post-stages
+    'smoothness', 'lumaLook', 'lutStrength',
+    // Debug toggles
+    'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
+  ];
+  function serializeLutPreset(){
+    const out = {};
+    for (const k of PRESET_KEYS){
+      if (state.params[k] !== undefined) out[k] = state.params[k];
+    }
+    return out;
+  }
+  function applyLutPresetObject(obj){
+    if (!obj || typeof obj !== 'object') return false;
+    let changed = 0;
+    for (const k of PRESET_KEYS){
+      if (obj[k] !== undefined && obj[k] !== state.params[k]){
+        state.params[k] = obj[k];
+        changed++;
+      }
+    }
+    if (!changed) return false;
+    // Refresh sliders
+    for (const [k, [inp, lbl, fmt]] of Object.entries(sliderMap)){
+      if (state.params[k] === undefined) continue;
+      const inpEl = document.getElementById(inp), lblEl = document.getElementById(lbl);
+      if (!inpEl || !lblEl) continue;
+      inpEl.value = state.params[k];
+      lblEl.textContent = fmt(state.params[k]);
+    }
+    if (state.params.softness !== undefined){
+      const sftSlider = 13 - state.params.softness;
+      const sftEl = document.getElementById('softness'), sftLbl = document.getElementById('vSoftness');
+      if (sftEl)  sftEl.value = sftSlider.toFixed(1);
+      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(1);
+    }
+    // Refresh toggles (envelope + debug stages)
+    const toggleIds = [
+      'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
+      'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
+    ];
+    for (const id of toggleIds){
+      const el = document.getElementById(id);
+      if (el && state.params[id] !== undefined) el.checked = !!state.params[id];
+    }
+    // Refresh method tab
+    refreshLutMethodBtns();
+    // Refresh lumaLook label (separate IIFE binding)
+    const lookLbl = document.getElementById('vLumaLook');
+    if (lookLbl) lookLbl.textContent = (state.params.lumaLook || 0).toFixed(2);
+    const lookInp = document.getElementById('lumaLook');
+    if (lookInp) lookInp.value = state.params.lumaLook || 0;
+    scheduleLutRebuild();
+    return true;
+  }
+  function flashBtn(btn, msg, ok){
+    if (!btn) return;
+    const orig = btn.textContent;
+    btn.textContent = msg;
+    btn.style.color = ok ? 'var(--ac)' : 'var(--bad)';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = '';
+    }, 900);
+  }
+  const copyBtn = document.getElementById('copyPreset');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    const json = JSON.stringify(serializeLutPreset(), null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      flashBtn(copyBtn, 'copied ✓', true);
+    } catch (e) {
+      // Fallback: pop in a prompt so the user can copy manually.
+      window.prompt('Copy this JSON preset:', json);
+      flashBtn(copyBtn, 'copied via prompt', true);
+    }
+  });
+  const loadBtn = document.getElementById('loadPreset');
+  if (loadBtn) loadBtn.addEventListener('click', async () => {
+    let txt = '';
+    try { txt = await navigator.clipboard.readText(); } catch (e) {}
+    txt = window.prompt('Paste JSON preset to load:', txt || '');
+    if (!txt) return;
+    try {
+      const obj = JSON.parse(txt);
+      if (applyLutPresetObject(obj)) flashBtn(loadBtn, 'loaded ✓', true);
+      else flashBtn(loadBtn, 'no params', false);
+    } catch (e) {
+      flashBtn(loadBtn, 'bad JSON', false);
+    }
   });
   function refreshLutMethodBtns(){
     document.querySelectorAll('[data-lutmethod]').forEach(b => {
