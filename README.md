@@ -1,8 +1,6 @@
 # SoftPalette
-Palette-based color grading via 3D LUT. Maps any image into a palette
-using soft 3D Voronoi interpolation in OkLab space — gradients stay
-continuous, gaps fill cleanly, and the cube extends to its borders by
-construction.
+Palette-based color grading.
+Maps any discrete palette into a soft 3D LUT — gradients stay continuous, gaps fill cleanly.
 
 ## Try it
 - Main: <https://manuelkugelmann.github.io/SoftPalette/>
@@ -11,11 +9,9 @@ construction.
 ## Usage
 - Drop an image.
 - Pick a palette (preset, extract-from-image, or hand-roll hex colors — up to 256 anchors).
-- The tool bakes a 3D LUT on the GPU (default 33³, selectable up to 257³)
-  by computing, for every cell, an inverse-distance-weighted blend of all
-  palette anchors in OkLab.
-- The result is applied to the image in real time. Drag anywhere on the
-  canvas to scrub a before/after split.
+- The tool bakes a 3D LUT (default 33³, selectable up to 257³)
+- The result is applied to the test image.
+  Drag anywhere on the canvas to scrub a before/after split.
 
 ## Use cases
 - Stylize photos to a game's palette (Quake, Moebius, Ghibli presets included).
@@ -31,10 +27,9 @@ construction.
 | **presets** | Curated palette presets — click to apply. `Quake256` is the full canonical 256-entry Quake 1 palette (gfx/palette.lmp); `FullQuake` is its 28-entry hue-binned subset; `SlimQuake` is a hue-deduped subset of `FullQuake` |
 | **palette** | 16-per-row swatch grid (left column). Click a swatch → native color picker. Right-click → remove. Up to 256 anchors |
 | **extend palette** | Optional auto-extension: each palette anchor stamps an N×N (L, C) constellation at its hue. `grid` chooses 1 (off), 3 (9 entries / anchor), 5, or 7. `L spread` and `chroma spread` set the ±range per axis. Total seeds are capped to 256 |
-| **IDW / Stripes** (tabs) | Choose the LUT-build method. Method-specific controls appear below |
-| **lut params · preset row** | `wash` · `soft` · `balanced` · `vivid` · `hard` — bundled (σ_L, σ_ab, softness, envelope, smoothness, lumaLook) operating points. Currently tuned for IDW; Stripes follows along but only its own controls have effect |
+| **IDW / Stripes** (tabs) | Choose the LUT-build method. |
 | **lut size** | Cube edge: 17 / 33 / 65 / 129 / 257 (production-standard sizes; odd values keep neutral grey cell-centered) |
-| **smoothness** | Post-build Gaussian blur iterations (IDW: 3D blur on the baked LUT; Stripes: blur + restamp loop count) |
+
 | **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
 
 ### IDW
@@ -46,6 +41,7 @@ construction.
 | **L range / chroma range** | Per-axis blend of the output toward the input cell's own L and C. `0` = snap fully to the anchor's nominal L/C (palette flattens the image). `1` = pass input L/C straight through (anchor only steers hue). Lets the image's lightness/saturation structure survive the palette mapping |
 | **reach** | Anchor rejection radius (OkLab units). Cells farther than `reach` from the nearest anchor desaturate — palette has no good answer for that hue/L combination |
 | **L env ± / C env ±** (with `floor` / `ceil` toggles) | Per-hue envelope half-width. Bounds come from a Gaussian-weighted soft-min/soft-max of palette anchor L (and C) within the local hue radius. Output is hard-clamped to `[envLLo − lExt, envLHi + lExt]` and analogously for chroma. The `floor` / `ceil` toggles disable that side individually |
+| **smoothness** | Gaussian blur iterations |
 | **luma look** | L→hue bias. 0 = off; 1 = pre-shift each cell's (a, b) fully toward the palette's L-conditional mean hue. Captures the teal-orange-style "cool shadows, warm highlights" automatically from the palette's L→(a,b) profile |
 
 ### Stripes
@@ -54,6 +50,7 @@ construction.
 | **stripe thickness** | Hue radius (rad) for the stripe stamp pass. Cells within this angular distance of a seed's hue get hue-snapped to that seed |
 | **chroma envelope** (`ceil` / `floor` + boost) | `ceil` caps stamped chroma at the per-hue palette envelope; `floor` lifts low-chroma cells up to the envelope. Boost inflates the envelope by −50 % … +200 % of the palette's natural per-hue chroma |
 | **luma envelope** (`ceil` / `floor` + boost) | `ceil` clamps output L at the palette's max L; `floor` clamps at min L. Boost extends the bounds by −50 % … +100 % of the palette's L range |
+| **smoothness** | blur + restamp loop count |
 
 ## Algorithm: IDW
 
