@@ -28,8 +28,10 @@ Two algorithms — pick one with the tabs at the top of the LUT params card.
 **IDW** blends every palette anchor with distance-weighted falloff. Smooth,
 painterly transitions between hues.
 
-**Stripes** snaps each cell to its nearest anchor's hue, then smooths with
-iterated blur. Graphical, posterised look with distinct hue regions.
+**Stripes** rasterises each anchor as a 1-cell-wide hue stripe (along its
+hue ray in OkLab), weighted strongest at the anchor's L / chroma. Iterated
+blur diffuses the stripes outward into the neutral background. Graphical,
+posterised look with distinct hue regions.
 
 Shared controls (apply to both):
 
@@ -59,7 +61,7 @@ Stripes-only:
 
 | Control | What it does |
 |---|---|
-| stripe thickness | Hue width of each anchor's stripe. Thin = posterised cells, wide = bands bleed into each other |
+| stripe iters | Build-time blur+restamp passes that diffuse the 1-cell-wide hue stripes outward. 0 = raw stripes on neutral, higher = smoother fill |
 
 ## How it works (short version)
 
@@ -69,9 +71,13 @@ position in OkLab space — and the image is mapped through it on the GPU.
 - **IDW**: each LUT cell is a distance-weighted blend of all palette anchors
   in OkLab, with chroma kept honest where anchors agree on a hue and falling
   back to grey where they don't. Built entirely on the GPU.
-- **Stripes**: each LUT cell snaps to the nearest palette anchor by hue and
-  gets clamped to that anchor's palette envelope. Iterated blur smooths
-  transitions between adjacent hue stripes. Built on the CPU and uploaded.
+- **Stripes**: starts with a palette-mean fill, then rasterises each
+  anchor's hue ray as a 1-cell-wide stripe across the (a, b) plane.
+  Stripe cells get a Gaussian-weighted blend of same-hue anchors in (L,
+  chroma) space — strongest at the anchor's exact position, interpolating
+  smoothly between same-hue anchors at different L or C, fading back to
+  neutral elsewhere. Iterated blur+restamp passes diffuse the stripes
+  outward. Built on the CPU and uploaded.
 
 After either build, **luma look** runs as a late stage that rotates each
 non-anchor cell's chroma direction toward the palette's natural dark /

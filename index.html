@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T13:41:33Z">
+<meta name="build" content="2026-05-21T13:54:56Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T13:41:33Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T13:54:56Z</span>
   </div>
 </header>
 
@@ -361,6 +361,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       </div>
     </div>
     <div id="stripesControls" style="display:none">
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>stripe iters</span><span class="v" id="vStripeIters">6</span></div>
+        <input type="range" id="stripeIters" min="0" max="40" step="1" value="6">
+      </div>
     </div>
 
     <!-- luma range / chroma range — shared between IDW and Stripes:
@@ -598,6 +602,9 @@ const state = {
     // Stripes-method params.
     hRange:         1.5708,// shared anchor hue range (rad). IDW: Gaussian gate
                           //   scale; Stripes: hard cutoff for the stamp pass.
+    stripeIters:    6,    // build-time blur+restamp iterations that diffuse
+                          //   the 1-cell-wide hue stripes outward. 0 = raw
+                          //   stripes only, neutral elsewhere.
     // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
     // shared with IDW — Stripes reuses the same controls.
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -1694,45 +1701,114 @@ function stripes_buildLut(N){
   if (palSeeds.length === 0) return null;
   const seeds = palSeeds;
 
-  // Shepard-like Gaussian-weighted fill driven by the shared 'reach' slider.
-  // Every cell gets weighted contributions from EVERY anchor — no per-axis
-  // cutoffs — so the LUT extends smoothly to the cube edges. The Gaussian
-  // never quite hits zero, so cells far from any anchor still inherit the
-  // weighted-average of the palette (mostly the nearest anchor's color).
-  // Cells AT an anchor's exact position get the anchor's color (d=0,
-  // weight max), and the final anchor-stamp pass pins them to one cell
-  // wide regardless of LUT size. Late-stage smoothness blur (shared with
-  // IDW) handles any further softening.
-  const reach = p.reach || 0.5;
-  const inv2s2 = 1 / (2 * reach * reach);
-
+  // Each anchor owns a hue STRIPE — the 1-cell-wide rasterization of its
+  // hue ray (constant atan2(b,a) angle) across the (a,b) plane, extending
+  // through every L slice. On the stripe, contributions from all anchors
+  // sharing this hue are blended by (L, chroma) distance; the weight peaks
+  // at the anchor's exact L/C, so same-hue anchors at different L/C
+  // interpolate smoothly along the stripe. Off the stripe → neutral fill
+  // (palette mean). Iter blur (stripeIters) then diffuses the stripes
+  // outward; iters=0 leaves the raw 1-cell stripes visible.
   const cellL  = idx => idx / (N - 1);
   const cellAB = idx => -LUT_AB_RANGE + (idx / (N - 1)) * (2 * LUT_AB_RANGE);
-  const data = new Float32Array(N*N*N*3);
+  const cellSizeAB = (2 * LUT_AB_RANGE) / (N - 1);
 
-  for (let li = 0; li < N; li++){
-    const L_cell = cellL(li);
-    for (let bi = 0; bi < N; bi++){
-      const b_cell = cellAB(bi);
-      for (let ai = 0; ai < N; ai++){
-        const a_cell = cellAB(ai);
-        let sumW = 1e-12, sumL = 0, sumA = 0, sumB = 0;
-        for (const s of seeds){
-          const dL = L_cell - s.L;
-          const dA = a_cell - s.a;
-          const dB = b_cell - s.b;
-          const d2 = dL*dL + dA*dA + dB*dB;
-          const w  = Math.exp(-d2 * inv2s2);
-          sumW += w;
-          sumL += w * s.L;
-          sumA += w * s.a;
-          sumB += w * s.b;
-        }
-        const idx = ((li*N + bi)*N + ai)*3;
-        data[idx]   = sumL / sumW;
-        data[idx+1] = sumA / sumW;
-        data[idx+2] = sumB / sumW;
+  // Palette mean — used as the neutral background everywhere a stripe
+  // doesn't cover.
+  let mL = 0, mA = 0, mB = 0;
+  for (const s of seeds){ mL += s.L; mA += s.a; mB += s.b; }
+  mL /= seeds.length; mA /= seeds.length; mB /= seeds.length;
+
+  const data = new Float32Array(N*N*N*3);
+  for (let i = 0; i < N*N*N; i++){
+    data[i*3] = mL; data[i*3+1] = mA; data[i*3+2] = mB;
+  }
+
+  // Sigmas for the along-stripe Gaussian. Reuses shared knobs so anchor
+  // range sliders affect both methods consistently.
+  const sigmaL = Math.max(0.05, p.lTol  || 0.5);
+  const sigmaC = Math.max(0.02, p.abTol || 0.2);
+  const invSL2 = 1 / (2 * sigmaL * sigmaL);
+  const invSC2 = 1 / (2 * sigmaC * sigmaC);
+
+  // Rasterize each anchor's hue ray as (ai, bi) cells. A cell is on a
+  // ray when the ray's nearest-cell pass at some radius lands there;
+  // walking r in half-cell steps and rounding to grid yields exactly
+  // 1-cell-wide stripes.
+  const stripeMap = new Map();
+  const aRadMax = LUT_AB_RANGE * 1.42; // ~sqrt(2) covers diagonal corner
+  for (const s of seeds){
+    const cosH = Math.cos(s.h), sinH = Math.sin(s.h);
+    const steps = Math.ceil(aRadMax / (cellSizeAB * 0.5)) + 2;
+    let lastKey = -1;
+    for (let i = 0; i <= steps; i++){
+      const r  = (i / steps) * aRadMax;
+      const av = r * cosH, bv = r * sinH;
+      const ai = Math.round((av + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+      const bi = Math.round((bv + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+      if (ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
+      const key = bi * N + ai;
+      if (key === lastKey) continue;
+      lastKey = key;
+      let bucket = stripeMap.get(key);
+      if (!bucket){ bucket = []; stripeMap.set(key, bucket); }
+      bucket.push(s);
+    }
+  }
+
+  // For each on-stripe (ai, bi) column, fill all L slices with a
+  // Gaussian-weighted blend of the contributing anchors. Alpha-mix
+  // against the palette mean so distant cells fade back to neutral —
+  // stripes only carry strong color near anchor (L, C) positions.
+  for (const [key, anchors] of stripeMap){
+    const ai = key % N;
+    const bi = (key - ai) / N;
+    const av = cellAB(ai), bv = cellAB(bi);
+    const chromaCell = Math.hypot(av, bv);
+    for (let li = 0; li < N; li++){
+      const Lc = cellL(li);
+      let sumW = 0, sumL = 0, sumA = 0, sumB = 0;
+      for (const s of anchors){
+        const dL = Lc - s.L;
+        const dC = chromaCell - s.C;
+        const w  = Math.exp(-dL*dL*invSL2 - dC*dC*invSC2);
+        sumW += w;
+        sumL += w * s.L;
+        sumA += w * s.a;
+        sumB += w * s.b;
       }
+      if (sumW <= 1e-9) continue;
+      const nL = sumL / sumW, nA = sumA / sumW, nB = sumB / sumW;
+      const alpha = 1 - Math.exp(-sumW); // saturates at sumW≈few
+      const idx = ((li*N + bi)*N + ai)*3;
+      data[idx]   = (1 - alpha) * mL + alpha * nL;
+      data[idx+1] = (1 - alpha) * mA + alpha * nA;
+      data[idx+2] = (1 - alpha) * mB + alpha * nB;
+    }
+  }
+
+  // Pin each anchor's exact LUT cell to its true Lab (the stripe fill
+  // already lands close, but rounding + alpha-mix may shift it slightly).
+  function stampAnchorCells(){
+    for (const s of seeds){
+      const li = Math.round(s.L * (N - 1));
+      const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+      const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+      if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
+      const idx = ((li*N + bi)*N + ai)*3;
+      data[idx] = s.L; data[idx+1] = s.a; data[idx+2] = s.b;
+    }
+  }
+  stampAnchorCells();
+
+  // Iter blur diffuses stripes into the neutral fill. Restamp after each
+  // pass so anchor cells stay pinned. iters=0 returns the raw stripes.
+  const iters = Math.max(0, Math.round(p.stripeIters || 0));
+  if (iters > 0){
+    const scratch = new Float32Array(data.length);
+    for (let it = 0; it < iters; it++){
+      stripes_blur3D(data, scratch, N, 0.3);
+      stampAnchorCells();
     }
   }
   return data;
@@ -3259,24 +3335,53 @@ function _writeLabToRGBA(dst, o, L, a, b){
   dst[o+3] = 255;
 }
 
-// Raw-Stripes preview: nearest-seed-by-hue Voronoi assignment (Stripes' step
-// 1 before any iter / blur / envelope clamp). Every cell stamps to the
-// closest seed's (L, C) at the seed's hue direction.
+// Raw-Stripes preview: step-1 hue-stripe rasterization. Mirrors
+// stripes_buildLut without the iter blur — every sample either lands on
+// an anchor's hue ray (cell's hue ≈ anchor hue) and gets a Gaussian-
+// weighted blend of same-hue anchors in (L, chroma) space, or falls off
+// the stripes and returns the palette mean. Lets the user see the raw
+// 1-cell stripes the build starts from.
 function rawStripesLab(L, a, b, seeds){
   if (seeds.length === 0) return [L, a, b];
-  const reach = state.params.reach || 0.5;
-  const inv2s2 = 1 / (2 * reach * reach);
-  let sumW = 1e-12, sumL = 0, sumA = 0, sumB = 0;
+  const p = state.params;
+  // Palette mean — neutral output for off-stripe samples.
+  let mL = 0, mA = 0, mB = 0;
+  for (const s of seeds){ mL += s.L; mA += s.a; mB += s.b; }
+  mL /= seeds.length; mA /= seeds.length; mB /= seeds.length;
+  const N = p.lutSize || 33;
+  const cellSizeAB = (2 * LUT_AB_RANGE) / (N - 1);
+  const chromaSample = Math.hypot(a, b);
+  if (chromaSample < cellSizeAB * 0.5) return [mL, mA, mB];
+  const hueSample = Math.atan2(b, a);
+  const sigmaL = Math.max(0.05, p.lTol  || 0.5);
+  const sigmaC = Math.max(0.02, p.abTol || 0.2);
+  const invSL2 = 1 / (2 * sigmaL * sigmaL);
+  const invSC2 = 1 / (2 * sigmaC * sigmaC);
+  // The stripe half-width in hue at this chroma equals the cell footprint
+  // perpendicular to the ray (atan(cellSize/2 / chroma)).
+  const halfHueWidth = Math.atan2(cellSizeAB * 0.5, chromaSample);
+  let sumW = 0, sumL = 0, sumA = 0, sumB = 0;
   for (const s of seeds){
-    const dL = L - s.L, dA = a - s.a, dB = b - s.b;
-    const d2 = dL*dL + dA*dA + dB*dB;
-    const w  = Math.exp(-d2 * inv2s2);
+    const sh = s.h !== undefined ? s.h : Math.atan2(s.b, s.a);
+    const sC = s.C !== undefined ? s.C : Math.hypot(s.a, s.b);
+    let dh = hueSample - sh;
+    while (dh >  Math.PI) dh -= 2 * Math.PI;
+    while (dh < -Math.PI) dh += 2 * Math.PI;
+    if (Math.abs(dh) > halfHueWidth) continue;
+    const dL = L - s.L;
+    const dC = chromaSample - sC;
+    const w  = Math.exp(-dL*dL*invSL2 - dC*dC*invSC2);
     sumW += w;
     sumL += w * s.L;
     sumA += w * s.a;
     sumB += w * s.b;
   }
-  return [sumL / sumW, sumA / sumW, sumB / sumW];
+  if (sumW <= 1e-9) return [mL, mA, mB];
+  const nL = sumL / sumW, nA = sumA / sumW, nB = sumB / sumW;
+  const alpha = 1 - Math.exp(-sumW);
+  return [(1 - alpha) * mL + alpha * nL,
+          (1 - alpha) * mA + alpha * nA,
+          (1 - alpha) * mB + alpha * nB];
 }
 
 // Raw-IDW preview pass — Shepard IDW + soft hue gate + chroma-preserve only.
@@ -4114,11 +4219,11 @@ function init(){
       'hard':     { lTol: 0.25, abTol: 0.07, softness: 8.0, lRange: 0.00, cRange: 0.00, reach: 0.40, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30 },
     },
     stripes: {
-      'wash':     { hRange: 2.50, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'soft':     { hRange: 1.80, lExt: 0.85, cExt: 0.30, smoothness: 4, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'balanced': { hRange: 1.20, lExt: 0.60, cExt: 0.20, smoothness: 3, lumaLook: 0.25, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'vivid':    { hRange: 0.70, lExt: 0.40, cExt: 0.10, smoothness: 2, lumaLook: 0.20, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'hard':     { hRange: 0.35, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: true,  cEnvCeil: true },
+      'wash':     { hRange: 2.50, stripeIters: 16, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'soft':     { hRange: 1.80, stripeIters: 10, lExt: 0.85, cExt: 0.30, smoothness: 4, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'balanced': { hRange: 1.20, stripeIters:  6, lExt: 0.60, cExt: 0.20, smoothness: 3, lumaLook: 0.25, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'vivid':    { hRange: 0.70, stripeIters:  3, lExt: 0.40, cExt: 0.10, smoothness: 2, lumaLook: 0.20, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+      'hard':     { hRange: 0.35, stripeIters:  1, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: true,  cEnvCeil: true },
     },
   };
   const sliderMap = {
@@ -4132,6 +4237,7 @@ function init(){
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
     hRange:         ['hRange',         'vHRange',         v => v.toFixed(2)],
+    stripeIters:    ['stripeIters',    'vStripeIters',    v => v.toFixed(0)],
   };
   const envToggleMap = {
     lEnvFloor: 'lEnvFloor',
@@ -4193,6 +4299,7 @@ function init(){
     // IDW build params
     'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
     // Stripes build params
+    'stripeIters',
     // Shared anchor hue range
     'hRange',
     // Shared envelope
@@ -4309,6 +4416,7 @@ function init(){
   refreshLutMethodBtns();
   // Stripes-only sliders + toggles.
   bindLutSlider('hRange',         'vHRange',         'hRange',         v => v.toFixed(2));
+  bindLutSlider('stripeIters',    'vStripeIters',    'stripeIters',    v => v.toFixed(0));
 
   function bindStripesToggle(id, key){
     const el = document.getElementById(id);
