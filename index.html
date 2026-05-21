@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T13:54:56Z">
+<meta name="build" content="2026-05-21T14:01:20Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T13:54:56Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T14:01:20Z</span>
   </div>
 </header>
 
@@ -336,35 +336,28 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
     </div>
 
-    <!-- Build-stage params for the selected method. Ordered to match
-         pipeline use: IDW (Voronoi build params) OR Stripes (stripe thickness). -->
-    <div id="idwControls">
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>luma anchor range</span><span class="v" id="vLTol">0.50</span></div>
-        <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>chroma anchor range</span><span class="v" id="vAbTol">0.20</span></div>
-        <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">9.0</span></div>
-        <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>reach</span><span class="v" id="vReach">0.25</span></div>
-        <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>anchor hue range</span><span class="v" id="vHRange">1.57</span></div>
-        <input type="range" id="hRange" min="0.05" max="3.1416" step="0.01" value="1.5708">
-      </div>
+    <!-- Build-stage params — fully shared between IDW and Stripes. Only
+         step 1 differs: IDW = GPU Shepard bake; Stripes = 1-cell hue-ray
+         stamps + late-stage blur diffusion. -->
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>luma anchor range</span><span class="v" id="vLTol">0.50</span></div>
+      <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
     </div>
-    <div id="stripesControls" style="display:none">
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>stripe iters</span><span class="v" id="vStripeIters">6</span></div>
-        <input type="range" id="stripeIters" min="0" max="40" step="1" value="6">
-      </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>chroma anchor range</span><span class="v" id="vAbTol">0.20</span></div>
+      <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">9.0</span></div>
+      <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>reach</span><span class="v" id="vReach">0.25</span></div>
+      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>anchor hue range</span><span class="v" id="vHRange">1.57</span></div>
+      <input type="range" id="hRange" min="0.05" max="3.1416" step="0.01" value="1.5708">
     </div>
 
     <!-- luma range / chroma range — shared between IDW and Stripes:
@@ -599,12 +592,9 @@ const state = {
     // LUT build method: 'idw' = GPU Shepard IDW bake; 'stripes' = CPU
     // hue-Voronoi stripes + global L/C clamps + smooth chroma envelope.
     lutMethod: 'idw',
-    // Stripes-method params.
+    // Shared between IDW and Stripes.
     hRange:         1.5708,// shared anchor hue range (rad). IDW: Gaussian gate
                           //   scale; Stripes: hard cutoff for the stamp pass.
-    stripeIters:    6,    // build-time blur+restamp iterations that diffuse
-                          //   the 1-cell-wide hue stripes outward. 0 = raw
-                          //   stripes only, neutral elsewhere.
     // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
     // shared with IDW — Stripes reuses the same controls.
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
@@ -1707,8 +1697,8 @@ function stripes_buildLut(N){
   // sharing this hue are blended by (L, chroma) distance; the weight peaks
   // at the anchor's exact L/C, so same-hue anchors at different L/C
   // interpolate smoothly along the stripe. Off the stripe → neutral fill
-  // (palette mean). Iter blur (stripeIters) then diffuses the stripes
-  // outward; iters=0 leaves the raw 1-cell stripes visible.
+  // (palette mean). The shared late-stage smoothness blur diffuses the
+  // stripes outward; smoothness=0 leaves the raw 1-cell stripes visible.
   const cellL  = idx => idx / (N - 1);
   const cellAB = idx => -LUT_AB_RANGE + (idx / (N - 1)) * (2 * LUT_AB_RANGE);
   const cellSizeAB = (2 * LUT_AB_RANGE) / (N - 1);
@@ -1787,29 +1777,17 @@ function stripes_buildLut(N){
     }
   }
 
-  // Pin each anchor's exact LUT cell to its true Lab (the stripe fill
-  // already lands close, but rounding + alpha-mix may shift it slightly).
-  function stampAnchorCells(){
-    for (const s of seeds){
-      const li = Math.round(s.L * (N - 1));
-      const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-      const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-      if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
-      const idx = ((li*N + bi)*N + ai)*3;
-      data[idx] = s.L; data[idx+1] = s.a; data[idx+2] = s.b;
-    }
-  }
-  stampAnchorCells();
-
-  // Iter blur diffuses stripes into the neutral fill. Restamp after each
-  // pass so anchor cells stay pinned. iters=0 returns the raw stripes.
-  const iters = Math.max(0, Math.round(p.stripeIters || 0));
-  if (iters > 0){
-    const scratch = new Float32Array(data.length);
-    for (let it = 0; it < iters; it++){
-      stripes_blur3D(data, scratch, N, 0.3);
-      stampAnchorCells();
-    }
+  // Pin each anchor's exact LUT cell to its true Lab (rounding + alpha-mix
+  // can shift it slightly). The shared late-stage smoothness blur diffuses
+  // the stripes outward into the neutral fill; smoothness=0 leaves the raw
+  // 1-cell stripes visible.
+  for (const s of seeds){
+    const li = Math.round(s.L * (N - 1));
+    const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+    const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+    if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
+    const idx = ((li*N + bi)*N + ai)*3;
+    data[idx] = s.L; data[idx+1] = s.a; data[idx+2] = s.b;
   }
   return data;
 }
@@ -1826,7 +1804,9 @@ function stripes_uploadLut(data, N){
     rgba[o+2] = data[j+2];
     rgba[o+3] = 1.0;
   }
-  gl.bindTexture(gl.TEXTURE_3D, state.lutTexRaw);
+  // Upload to lutTex so the shared late-stage pipeline (stamp → smoothness
+  // blur → reach → lumalook) treats this exactly like an IDW bake.
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
   gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, N, N, N, gl.RGBA, gl.FLOAT, rgba);
 }
 
@@ -1919,6 +1899,70 @@ function scheduleLumaLookRefresh(){
   });
 }
 
+// Shared post-build pipeline: anchor stamp → smoothness blur+restamp loop
+// → reach desaturation → luma-look rotation. Both IDW and Stripes run this
+// after their respective step-1 bakes write into state.lutTex.
+function applyLateStages(seeds, N){
+  const gl = state.gl;
+
+  // Anchor stamp right after the build — guarantees that the LUT cell at
+  // every seed's Lab holds the seed's EXACT value before any blur runs.
+  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
+
+  // Smoothness post-pass: per iter = 3 separable axis-blurs, then anchor
+  // restamp. For Stripes this is also what diffuses the raw 1-cell hue
+  // stripes outward into the neutral background.
+  const iters = state.params.debugBlur ? Math.max(0, Math.round(state.params.smoothness || 0)) : 0;
+  if (iters > 0){
+    const blurProg = state.programs.lutBlur;
+    gl.useProgram(blurProg);
+    gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'), N);
+    const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
+    const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
+    const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
+    const axes = [[1,0,0], [0,1,0], [0,0,1]];
+    let src = state.lutTex, dst = state.lutTex2;
+    for (let it = 0; it < iters; it++){
+      gl.useProgram(blurProg);
+      gl.uniform1i(uBlurSrc, 1);
+      for (const ax of axes){
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_3D, src);
+        gl.uniform3f(uBlurAxis, ax[0], ax[1], ax[2]);
+        for (let z = 0; z < N; z++){
+          gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dst, 0, z);
+          gl.uniform1f(uBlurZ, z);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+        const tmp = src; src = dst; dst = tmp;
+      }
+      if (state.params.debugStamps) stampAnchors(src, N, seeds);
+    }
+    state.lutTex  = src;
+    state.lutTex2 = dst;
+  }
+
+  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
+
+  // Late-stage reach desaturation on the just-built LUT.
+  applyReachPass(state.lutTex, state.lutTex2);
+  { const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t; }
+  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
+  // Move the raw (pre-luma-look) bake result into state.lutTexRaw, then run
+  // the late-stage luma-look pass which writes the final output into
+  // state.lutTex (the texture sampled by the per-pixel shader). Caching the
+  // raw result means changing only the lumaLook slider re-runs that single
+  // pass — no full rebuild.
+  const tmpLut    = state.lutTex;
+  state.lutTex    = state.lutTexRaw;
+  state.lutTexRaw = tmpLut;
+  applyLumaLookPass();
+
+  // Restore default framebuffer / viewport.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, state.imageW || 1, state.imageH || 1);
+}
+
 function recomputeLut(){
   const gl = state.gl;
   if (!gl) return;
@@ -1943,19 +1987,22 @@ function recomputeLut(){
   uploadHueLCCurve(state.hueLCCurve);
   ensureLutTexture(N);
 
-  // Method tab: main-style CPU build short-circuits the soft IDW GPU bake.
+  // Step 1 differs between methods. Both write into state.lutTex; the
+  // shared late-stage pipeline below (anchor stamp → smoothness blur+stamp
+  // loop → reach → lumalook) is identical.
   if (state.params.lutMethod === 'stripes'){
     const data = stripes_buildLut(N);
     if (data) stripes_uploadLut(data, N);
-    // Late-stage reach desaturation (shared with IDW).
-    applyReachPass(state.lutTexRaw, state.lutTex2);
-    { const t = state.lutTexRaw; state.lutTexRaw = state.lutTex2; state.lutTex2 = t; }
-    if (state.params.debugStamps) stampAnchors(state.lutTexRaw, N, paletteSeeds());
-    applyLumaLookPass();
+    // Ensure the FBO is bound for the late-stage GPU passes that follow.
+    if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
+    gl.viewport(0, 0, N, N);
+    applyLateStages(seeds, N);
     state.lutBuildMs = performance.now() - t0;
     updateLutStatus();
+    updateExtendStatus();
     renderHuePreview();
-    requestRender();
+    renderSwatches();
     return;
   }
 
@@ -2002,62 +2049,7 @@ function recomputeLut(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  // Anchor stamp right after the IDW build — guarantees that the LUT cell at
-  // every seed's Lab holds the seed's EXACT value before any blur runs.
-  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
-
-  // Smoothness post-pass: per iter = 3 separable axis-blurs, then anchor restamp.
-  const iters = state.params.debugBlur ? Math.max(0, Math.round(state.params.smoothness || 0)) : 0;
-  if (iters > 0){
-    const blurProg = state.programs.lutBlur;
-    gl.useProgram(blurProg);
-    gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'), N);
-    const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
-    const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
-    const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
-    const axes = [[1,0,0], [0,1,0], [0,0,1]];
-    let src = state.lutTex, dst = state.lutTex2;
-    for (let it = 0; it < iters; it++){
-      gl.useProgram(blurProg);
-      gl.uniform1i(uBlurSrc, 1);
-      for (const ax of axes){
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_3D, src);
-        gl.uniform3f(uBlurAxis, ax[0], ax[1], ax[2]);
-        for (let z = 0; z < N; z++){
-          gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dst, 0, z);
-          gl.uniform1f(uBlurZ, z);
-          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        }
-        const tmp = src; src = dst; dst = tmp;
-      }
-      // Restamp anchors after every blur iter so seed cells stay exact.
-      if (state.params.debugStamps) stampAnchors(src, N, seeds);
-    }
-    state.lutTex  = src;
-    state.lutTex2 = dst;
-  }
-
-  // Final stamp before the swap → luma-look pass.
-  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
-
-  // Late-stage reach desaturation on the just-built LUT.
-  applyReachPass(state.lutTex, state.lutTex2);
-  { const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t; }
-  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
-  // Move the raw (pre-luma-look) bake result into state.lutTexRaw, then run
-  // the late-stage luma-look pass which writes the final output into
-  // state.lutTex (the texture sampled by the per-pixel shader). Caching the
-  // raw result means changing only the lumaLook slider re-runs that single
-  // pass — no full rebuild.
-  const tmpLut    = state.lutTex;
-  state.lutTex    = state.lutTexRaw;
-  state.lutTexRaw = tmpLut;
-  applyLumaLookPass();
-
-  // Restore default framebuffer / viewport.
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.viewport(0, 0, state.imageW || 1, state.imageH || 1);
+  applyLateStages(seeds, N);
 
   state.lutBuildMs = performance.now() - t0;
   updateLutStatus();
@@ -4200,9 +4192,8 @@ function init(){
     });
   })();
 
-  // Per-method presets. Same five names ('wash' … 'hard') but different
-  // param tunings under IDW vs Stripes. applyLutPreset reads the dict for
-  // the currently selected method.
+  // Shared presets — IDW and Stripes consume the same params; only step 1
+  // (GPU Shepard bake vs CPU 1-cell hue stripes) differs.
   // Preset sweep:
   //   wash      = infer FULL LUT from palette  — broad extrapolation,
   //               image structure preserved (lRange / cRange high), wide
@@ -4210,21 +4201,12 @@ function init(){
   //   hard      = close to palette              — snap to palette colors,
   //               lRange/cRange ≈ 0, tight envelope, near-Voronoi softness.
   // Soft / balanced / vivid step between the two ends.
-  const lutPresetsByMethod = {
-    idw: {
-      'wash':     { lTol: 0.9,  abTol: 0.30, softness: 1.2, lRange: 1.00, cRange: 0.80, reach: 0.50, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40 },
-      'soft':     { lTol: 0.7,  abTol: 0.25, softness: 2.0, lRange: 0.80, cRange: 0.55, reach: 0.35, lExt: 0.85, cExt: 0.32, smoothness: 4, lumaLook: 0.30 },
-      'balanced': { lTol: 0.5,  abTol: 0.18, softness: 3.5, lRange: 0.50, cRange: 0.40, reach: 0.30, lExt: 0.60, cExt: 0.22, smoothness: 3, lumaLook: 0.25 },
-      'vivid':    { lTol: 0.35, abTol: 0.10, softness: 5.0, lRange: 0.25, cRange: 0.20, reach: 0.30, lExt: 0.40, cExt: 0.15, smoothness: 2, lumaLook: 0.20 },
-      'hard':     { lTol: 0.25, abTol: 0.07, softness: 8.0, lRange: 0.00, cRange: 0.00, reach: 0.40, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30 },
-    },
-    stripes: {
-      'wash':     { hRange: 2.50, stripeIters: 16, lExt: 1.00, cExt: 0.40, smoothness: 6, lumaLook: 0.40, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'soft':     { hRange: 1.80, stripeIters: 10, lExt: 0.85, cExt: 0.30, smoothness: 4, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'balanced': { hRange: 1.20, stripeIters:  6, lExt: 0.60, cExt: 0.20, smoothness: 3, lumaLook: 0.25, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'vivid':    { hRange: 0.70, stripeIters:  3, lExt: 0.40, cExt: 0.10, smoothness: 2, lumaLook: 0.20, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
-      'hard':     { hRange: 0.35, stripeIters:  1, lExt: 0.10, cExt: 0.05, smoothness: 1, lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: true,  cEnvCeil: true },
-    },
+  const lutPresets = {
+    'wash':     { lTol: 0.9,  abTol: 0.30, softness: 1.2, lRange: 1.00, cRange: 0.80, reach: 0.50, hRange: 2.50, lExt: 1.00, cExt: 0.40, smoothness: 12, lumaLook: 0.40, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+    'soft':     { lTol: 0.7,  abTol: 0.25, softness: 2.0, lRange: 0.80, cRange: 0.55, reach: 0.35, hRange: 1.80, lExt: 0.85, cExt: 0.32, smoothness: 8,  lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+    'balanced': { lTol: 0.5,  abTol: 0.18, softness: 3.5, lRange: 0.50, cRange: 0.40, reach: 0.30, hRange: 1.20, lExt: 0.60, cExt: 0.22, smoothness: 5,  lumaLook: 0.25, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+    'vivid':    { lTol: 0.35, abTol: 0.10, softness: 5.0, lRange: 0.25, cRange: 0.20, reach: 0.30, hRange: 0.70, lExt: 0.40, cExt: 0.15, smoothness: 3,  lumaLook: 0.20, lEnvFloor: true, lEnvCeil: true, cEnvFloor: false, cEnvCeil: true },
+    'hard':     { lTol: 0.25, abTol: 0.07, softness: 8.0, lRange: 0.00, cRange: 0.00, reach: 0.40, hRange: 0.35, lExt: 0.10, cExt: 0.05, smoothness: 1,  lumaLook: 0.30, lEnvFloor: true, lEnvCeil: true, cEnvFloor: true,  cEnvCeil: true },
   };
   const sliderMap = {
     lTol:       ['lTol',       'vLTol',       v => v.toFixed(2)],
@@ -4237,7 +4219,6 @@ function init(){
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
     hRange:         ['hRange',         'vHRange',         v => v.toFixed(2)],
-    stripeIters:    ['stripeIters',    'vStripeIters',    v => v.toFixed(0)],
   };
   const envToggleMap = {
     lEnvFloor: 'lEnvFloor',
@@ -4261,8 +4242,7 @@ function init(){
     refreshLutPresetBtns();
   }
   function applyLutPreset(name){
-    const presets = lutPresetsByMethod[state.params.lutMethod] || lutPresetsByMethod.idw;
-    const p = presets[name];
+    const p = lutPresets[name];
     if (!p) return;
     Object.assign(state.params, p);
     setActivePreset(name);
@@ -4298,8 +4278,6 @@ function init(){
     'lutMethod', 'lutSize',
     // IDW build params
     'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
-    // Stripes build params
-    'stripeIters',
     // Shared anchor hue range
     'hRange',
     // Shared envelope
@@ -4399,11 +4377,6 @@ function init(){
     document.querySelectorAll('[data-lutmethod]').forEach(b => {
       b.classList.toggle('selected', b.dataset.lutmethod === state.params.lutMethod);
     });
-    const idwUI     = document.getElementById('idwControls');
-    const stripesUI = document.getElementById('stripesControls');
-    const isStripes = state.params.lutMethod === 'stripes';
-    if (idwUI)     idwUI.style.display     = isStripes ? 'none' : '';
-    if (stripesUI) stripesUI.style.display = isStripes ? '' : 'none';
   }
   document.querySelectorAll('[data-lutmethod]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -4416,7 +4389,6 @@ function init(){
   refreshLutMethodBtns();
   // Stripes-only sliders + toggles.
   bindLutSlider('hRange',         'vHRange',         'hRange',         v => v.toFixed(2));
-  bindLutSlider('stripeIters',    'vStripeIters',    'stripeIters',    v => v.toFixed(0));
 
   function bindStripesToggle(id, key){
     const el = document.getElementById(id);
