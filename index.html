@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:16:34Z">
+<meta name="build" content="2026-05-21T10:17:09Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:16:34Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:17:09Z</span>
   </div>
 </header>
 
@@ -340,11 +340,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
          pipeline use: IDW (Voronoi build params) OR Stripes (stripe thickness). -->
     <div id="idwControls">
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>luma pull</span><span class="v" id="vLTol">0.50</span></div>
+        <div class="lbl"><span>luma anchor range</span><span class="v" id="vLTol">0.50</span></div>
         <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>chroma pull</span><span class="v" id="vAbTol">0.20</span></div>
+        <div class="lbl"><span>chroma anchor range</span><span class="v" id="vAbTol">0.20</span></div>
         <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
       </div>
       <div class="slider" style="margin-top:6px">
@@ -366,11 +366,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <!-- luma range / chroma range — shared between IDW and Stripes:
          blend back from palette anchor L/C (0) toward image L/C (1). -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma range</span><span class="v" id="vLRange">1.00</span></div>
+      <div class="lbl"><span>luma blend</span><span class="v" id="vLRange">1.00</span></div>
       <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma range</span><span class="v" id="vCRange">0.50</span></div>
+      <div class="lbl"><span>chroma blend</span><span class="v" id="vCRange">0.50</span></div>
       <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
     </div>
 
@@ -412,7 +412,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
     <!-- Final blend with identity -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>lut strength</span><span class="v" id="vLutStrength">100%</span></div>
+      <div class="lbl"><span>lut blend</span><span class="v" id="vLutStrength">100%</span></div>
       <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
     </div>
 
