@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T08:50:46Z">
+<meta name="build" content="2026-05-21T09:02:21Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T08:50:46Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:02:21Z</span>
   </div>
 </header>
 
@@ -1344,15 +1344,12 @@ function uploadSeeds(packed){
 const LUMA_BINS = 16;
 const HUE_ENV_BINS = 32;
 // Build a 32×(L_lo, L_hi, C_lo, C_hi) curve indexed by hue (radians).
-// Per-hue local envelope: at each hue bin, consider anchors within
-// radius = π/2 (90°) of that hue. Weight each by a triangular falloff
-// (1 at the anchor's own hue, 0 at the radius edge), then take soft-min
-// and soft-max of L and C with β=8. Bounds vary smoothly with hue
-// because anchor weights fade in/out continuously as they enter/leave
-// the radius. NOT a convex hull — distant anchors don't connect across
-// the ring, so the envelope stays local to the hue neighborhood.
-// Synthetic anchors (blackpoint/whitepoint, palette-extend ghosts)
-// excluded so the envelope reflects user-curated anchors only.
+// Per-hue HARD min/max of palette anchors within radius = π/2 (90°). Hard
+// bounds guarantee that every anchor is inside the envelope at its own
+// hue (and at all nearby hues within the radius) — no smoothing can pull
+// the envelope past an anchor. Synthetic anchors excluded so the curve
+// reflects user-curated palette only. Texture LINEAR filtering between
+// adjacent bins gives a piecewise-linear envelope across the hue ring.
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
   const ch = seeds.filter(s => Math.hypot(s.a, s.b) > 0.02 && !s.synthetic);
@@ -1372,7 +1369,7 @@ function computeHueLCCurve(seeds){
     L: s.L,
     C: Math.hypot(s.a, s.b),
   }));
-  // Global fallback bounds (if no anchor is within radius at a bin)
+  // Global fallback if no anchor is within radius at a bin (sparse palettes).
   let gLo = Infinity, gHi = -Infinity, gCHi = 0;
   for (const a of A){
     if (a.L < gLo) gLo = a.L;
@@ -1380,30 +1377,22 @@ function computeHueLCCurve(seeds){
     if (a.C > gCHi) gCHi = a.C;
   }
   const radius = Math.PI / 2;
-  const beta   = 8;
   for (let i = 0; i < HUE_ENV_BINS; i++){
     const h = ((i + 0.5) / HUE_ENV_BINS) * TWO_PI - Math.PI;
-    let sumW = 0, sumNegL = 0, sumPosL = 0, sumPosC = 0;
-    for (const s of A){
-      let d = Math.abs(s.h - h);
+    let lLo = Infinity, lHi = -Infinity, cHi = 0;
+    let hits = 0;
+    for (const a of A){
+      let d = Math.abs(a.h - h);
       if (d > Math.PI) d = TWO_PI - d;
       if (d >= radius) continue;
-      const w = 1 - d / radius;
-      sumW    += w;
-      sumNegL += w * Math.exp(-beta * s.L);
-      sumPosL += w * Math.exp( beta * s.L);
-      sumPosC += w * Math.exp( beta * s.C);
+      if (a.L < lLo) lLo = a.L;
+      if (a.L > lHi) lHi = a.L;
+      if (a.C > cHi) cHi = a.C;
+      hits++;
     }
-    let lLo, lHi, cHi;
-    if (sumW > 1e-9){
-      lLo = Math.max(0, -Math.log(sumNegL / sumW) / beta);
-      lHi = Math.min(1,  Math.log(sumPosL / sumW) / beta);
-      cHi =              Math.log(sumPosC / sumW) / beta;
-    } else {
-      lLo = gLo; lHi = gHi; cHi = gCHi;
-    }
-    buf[i*4+0] = lLo;
-    buf[i*4+1] = lHi;
+    if (!hits){ lLo = gLo; lHi = gHi; cHi = gCHi; }
+    buf[i*4+0] = Math.max(0, lLo);
+    buf[i*4+1] = Math.min(1, lHi);
     buf[i*4+2] = 0;
     buf[i*4+3] = cHi;
   }
