@@ -16,7 +16,7 @@ new_url="https://raw.githack.com/${owner_repo}/${branch}/index.html"
 # Replace the URL on the matching README line.
 tmp="$(mktemp)"
 awk -v url="$new_url" '
-  /\*\*This branch \(raw\.githack\)\*\*/ {
+  /^- Branch:/ {
     sub(/<https:\/\/raw\.githack\.com\/[^>]*>/, "<" url ">")
   }
   { print }

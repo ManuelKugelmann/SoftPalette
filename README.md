@@ -5,17 +5,8 @@ continuous, gaps fill cleanly, and the cube extends to its borders by
 construction.
 
 ## Try it
-- **Live (GitHub Pages, main branch)**: <https://manuelkugelmann.github.io/SoftPalette/>
-- **This branch (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
-
-The "This branch" link is kept in sync automatically:
-- **Locally**: enable the tracked pre-commit hook once per clone with
-  `git config core.hooksPath .githooks`. Re-sync manually with
-  `scripts/sync-readme-branch.sh`.
-- **Server-side**: a GitHub Actions workflow
-  (`.github/workflows/sync-readme-branch.yml`) runs on every push, rewrites
-  the link to match `github.ref_name`, and pushes the fix back. Skips
-  itself via `[skip readme-sync]` in its own commit messages, so no loop.
+- Main: <https://manuelkugelmann.github.io/SoftPalette/>
+- Branch: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
 
 ## Usage
 - Drop an image.
