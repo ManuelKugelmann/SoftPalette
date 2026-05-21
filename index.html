@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:23:22Z">
+<meta name="build" content="2026-05-21T10:26:39Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:23:22Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:26:39Z</span>
   </div>
 </header>
 
@@ -404,7 +404,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
     <!-- Smooth pass (after envelope clamp, before luma look) -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>smoothness</span><span class="v" id="vSmoothness">0</span></div>
+      <div class="lbl"><span>blur</span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="30" step="1" value="0">
     </div>
 
@@ -1816,6 +1816,38 @@ function stripes_uploadLut(data, N){
 // Reads each cell, rotates (a, b) toward the L-conditional mean hue, writes
 // to state.lutTex. Re-runnable when only the lumaLook slider changes — no
 // rebuild. uLumaLook = 0 makes the pass a pure copy.
+// Late-stage reach pass — reads from one 3D texture, writes the
+// desaturated result to another. Ping-pongs lutTex / lutTex2 like the
+// blur. Skipped on the empty-palette path.
+function applyReachPass(srcTex, dstTex){
+  if (!srcTex || !dstTex) return;
+  const gl = state.gl;
+  const N  = state.lutN;
+  const prog = state.programs.lutReach;
+  gl.useProgram(prog);
+  gl.bindVertexArray(state.vao);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, state.seedTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uSeeds'), 0);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uPalN'),  Math.min(state.palette.length, MAX_PAL));
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, srcTex);
+  gl.uniform1i(gl.getUniformLocation(prog, 'uLutIn'), 1);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),  state.params.reach);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uN'),      N);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+  const uZ = gl.getUniformLocation(prog, 'uZ');
+  if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
+  gl.viewport(0, 0, N, N);
+  for (let z = 0; z < N; z++){
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dstTex, 0, z);
+    gl.uniform1f(uZ, z);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
 function applyLumaLookPass(){
   if (!state.lutTexRaw || !state.lutTex) return;
   const gl = state.gl;
@@ -1897,6 +1929,10 @@ function recomputeLut(){
   if (state.params.lutMethod === 'stripes'){
     const data = stripes_buildLut(N);
     if (data) stripes_uploadLut(data, N);
+    // Late-stage reach desaturation (shared with IDW).
+    applyReachPass(state.lutTexRaw, state.lutTex2);
+    { const t = state.lutTexRaw; state.lutTexRaw = state.lutTex2; state.lutTex2 = t; }
+    if (state.params.debugStamps) stampAnchors(state.lutTexRaw, N, paletteSeeds());
     applyLumaLookPass();
     state.lutBuildMs = performance.now() - t0;
     updateLutStatus();
@@ -1920,7 +1956,6 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLRange'),  state.params.lRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCRange'),  state.params.cRange);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),   state.params.reach);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLExt'),    state.params.lExt);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCExt'),    state.params.cExt);
   // Stage toggle: when debugEnvelope is off, all four sides report 'no clamp'.
@@ -1987,6 +2022,10 @@ function recomputeLut(){
   // Final stamp before the swap → luma-look pass.
   if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
 
+  // Late-stage reach desaturation on the just-built LUT.
+  applyReachPass(state.lutTex, state.lutTex2);
+  { const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t; }
+  if (state.params.debugStamps) stampAnchors(state.lutTex, N, seeds);
   // Move the raw (pre-luma-look) bake result into state.lutTexRaw, then run
   // the late-stage luma-look pass which writes the final output into
   // state.lutTex (the texture sampled by the per-pixel shader). Caching the
@@ -2110,7 +2149,6 @@ uniform float uSigmaAB;       // anisotropic A/B axes
 uniform float uSoftness;      // IDW power exponent
 uniform float uLRange;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCRange;        // 0 = snap chroma to anchor, 1 = passthrough cell C
-uniform float uReach;         // anchor rejection radius in absolute OkLab units
 uniform float uLExt;          // L envelope half-range (0 = snap, 1 = noop)
 uniform float uCExt;          // C envelope half-range (0 = snap, LUT_AB_RANGE = noop)
 uniform float uLEnvFloor;     // 1 = clamp lab.x to envLLo - uLExt; 0 = no lower L clamp
@@ -2200,14 +2238,8 @@ void main(){
   float cellC     = length(vec2(a, b));
   float finalMag  = mix(target, cellC, uCRange * coherence);
   if (magAB > 1e-6) lab.yz *= finalMag / magAB;
-  // Rejection envelope: when the nearest anchor is farther than uReach (in
-  // absolute OkLab units) from this cell, the palette has no good answer.
-  // Desaturate rather than invent a hue — exp falloff outside the reach ball,
-  // identity inside. Fixes "red+blue palette + green input turning into a
-  // confident wrong hue" by collapsing chroma to grey where no anchor is close.
-  // Uses isotropic distance so it stays independent of σ_L/σ_ab tolerances.
-  float r2 = dmin2_iso / max(uReach * uReach, 1e-9);
-  lab.yz *= exp(-max(r2 - 1.0, 0.0));
+  // Reach desaturation moved to a LATE-STAGE shared pass (FS_LUT_REACH) so
+  // both IDW and Stripes runs through the same anchor-distance falloff.
   lab.x = mix(lab.x, L, uLRange);
   // Per-channel envelope clamp around the nearest anchor's L / C. At max
   // slider (uLExt=1, uCExt=LUT_AB_RANGE) the range covers the whole axis and
@@ -2380,6 +2412,45 @@ void main(){
   fragColor = vec4(lab, 1.0);
 }`;
 
+// Late-stage reach desaturation. For each LUT cell, computes the isotropic
+// OkLab distance from the cell's INPUT position to the nearest palette
+// anchor; if it's beyond uReach, the cell's chroma is exponentially
+// attenuated toward grey. Replaces the per-cell rejection that used to live
+// inside FS_LUT_BUILD — pulling it out makes the same falloff usable by
+// Stripes (and any future build method) without duplicating the logic.
+const FS_LUT_REACH = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+out vec4 fragColor;
+uniform sampler3D uLutIn;
+uniform sampler2D uSeeds;
+uniform int   uPalN;
+uniform float uReach;
+uniform float uN;
+uniform float uZ;
+uniform float uAbRange;
+void main(){
+  float N    = uN;
+  float ai   = floor(gl_FragCoord.x);
+  float bi   = floor(gl_FragCoord.y);
+  float L_in = uZ / max(N - 1.0, 1.0);
+  float a_in = -uAbRange + (ai / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
+  float b_in = -uAbRange + (bi / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
+  vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
+  vec3  lab  = texture(uLutIn, uvw).rgb;
+  float dmin2 = 1e30;
+  for (int i = 0; i < ${MAX_PAL}; i++){
+    if (i >= uPalN) break;
+    vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
+    float dL = L_in - s.x, dA = a_in - s.y, dB = b_in - s.z;
+    float d2 = dL * dL + dA * dA + dB * dB;
+    if (d2 < dmin2) dmin2 = d2;
+  }
+  float r2 = dmin2 / max(uReach * uReach, 1e-9);
+  lab.yz *= exp(-max(r2 - 1.0, 0.0));
+  fragColor = vec4(lab, 1.0);
+}`;
+
 const FS_LUT_SLICE = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -2444,6 +2515,7 @@ function initGL(){
   state.programs.lutStamp = program(VS, FS_LUT_STAMP);
   state.programs.lutSlice    = program(VS, FS_LUT_SLICE);
   state.programs.lutLumalook = program(VS, FS_LUT_LUMALOOK);
+  state.programs.lutReach    = program(VS, FS_LUT_REACH);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
