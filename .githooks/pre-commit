@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Keep the README's branch-githack link in sync with the current branch.
-# Re-stages README.md if the script modified it.
+# Keep generated / derived files in sync with the commit:
+#   1. README's branch-githack link points at the current branch.
+#   2. index.html's build timestamp matches the commit moment.
+# Both scripts are idempotent; re-stage the files if they actually moved.
 set -e
 repo="$(git rev-parse --show-toplevel)"
 "$repo/scripts/sync-readme-branch.sh"
-# If the script changed README, stage the update so it lands in this commit.
+"$repo/scripts/sync-build-timestamp.sh"
 if ! git diff --quiet -- README.md; then
   git add README.md
+fi
+if ! git diff --quiet -- index.html; then
+  git add index.html
 fi

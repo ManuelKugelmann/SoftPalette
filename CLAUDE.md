@@ -1,22 +1,20 @@
 # SoftPalette — repo conventions for Claude
 
-## Build timestamp — bump on every commit
+## Build timestamp — auto-bumped, don't touch by hand
 
 The `<meta name="build" content="...">` tag and the `#buildBadge` span in
-`index.html` carry an ISO-8601 UTC timestamp that the user reads from the
-header (it's also click-to-copy). **Update both to the current UTC time
-right before each `git commit`** so the badge always reflects the freshest
-push.
+`index.html` carry an ISO-8601 UTC timestamp the user reads from the
+header (click-to-copy). It's kept fresh automatically:
 
-```bash
-TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-# Then edit index.html: replace the timestamp in both the <meta name="build">
-# tag and the <span id="buildBadge">…</span> body with $TS.
-```
+- `.githooks/pre-commit` runs `scripts/sync-build-timestamp.sh` and
+  re-stages `index.html` so every commit lands with the current time.
+- `.github/workflows/sync-build-timestamp.yml` is the server-side
+  fallback — if a push arrives with an older timestamp, the workflow
+  rewrites and pushes a `[skip build-timestamp]` follow-up.
 
-The two literals must match exactly. The header tooltip tells users to
-hard-reload if the badge doesn't match the latest edit, so a stale
-timestamp is misleading.
+Don't edit the two literals manually; the hook overwrites them anyway.
+If the local hook isn't installed, run `git config core.hooksPath .githooks`
+once in the worktree.
 
 ## Branch + push
 
