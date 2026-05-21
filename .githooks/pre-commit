@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Keep the README's branch-githack link in sync with the current branch.
+# Re-stages README.md if the script modified it.
+set -e
+repo="$(git rev-parse --show-toplevel)"
+"$repo/scripts/sync-readme-branch.sh"
+# If the script changed README, stage the update so it lands in this commit.
+if ! git diff --quiet -- README.md; then
+  git add README.md
+fi

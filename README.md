@@ -8,6 +8,11 @@ construction.
 - **Live (GitHub Pages, main branch)**: <https://manuelkugelmann.github.io/SoftPalette/>
 - **This branch (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
 
+The "This branch" link is kept in sync automatically by a `pre-commit` hook
+in `.githooks/`. Enable it once per clone with `git config core.hooksPath
+.githooks` — afterwards every commit rewrites the URL to match the branch
+checked out. To re-sync manually, run `scripts/sync-readme-branch.sh`.
+
 ## Usage
 - Drop an image.
 - Pick a palette (preset, extract-from-image, or hand-roll hex colors — up to 256 anchors).
