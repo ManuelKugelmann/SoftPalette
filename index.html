@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T06:50:35Z">
+<meta name="build" content="2026-05-21T08:33:47Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T06:50:35Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T08:33:47Z</span>
   </div>
 </header>
 
@@ -267,15 +267,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
     <div class="slider" id="extendHWrap" style="margin-top:8px">
-      <div class="lbl"><span>H gap <span style="color:var(--txdd)">rad, 6.28 = off</span></span><span class="v" id="vExtendH">6.28</span></div>
+      <div class="lbl"><span>hue gap <span style="color:var(--txdd)">rad, 6.28 = off</span></span><span class="v" id="vExtendH">6.28</span></div>
       <input type="range" id="extendH" min="0" max="6.28" step="0.05" value="6.28">
     </div>
     <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>C steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendC">1</span></div>
+      <div class="lbl"><span>chroma steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendC">1</span></div>
       <input type="range" id="extendC" min="0" max="8" step="1" value="1">
     </div>
     <div class="slider" id="extendLWrap" style="margin-top:6px">
-      <div class="lbl"><span>L steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendL">1</span></div>
+      <div class="lbl"><span>luma steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendL">1</span></div>
       <input type="range" id="extendL" min="0" max="8" step="1" value="1">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
@@ -327,11 +327,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>L tol <span style="color:var(--txdd)">σ_L</span></span><span class="v" id="vLTol">0.50</span></div>
+      <div class="lbl"><span>luma tol <span style="color:var(--txdd)">anchor pull radius along luma</span></span><span class="v" id="vLTol">0.50</span></div>
       <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>C tol <span style="color:var(--txdd)">σ_ab</span></span><span class="v" id="vAbTol">0.20</span></div>
+      <div class="lbl"><span>chroma tol <span style="color:var(--txdd)">anchor pull radius across chroma</span></span><span class="v" id="vAbTol">0.20</span></div>
       <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
     </div>
     <div class="slider" style="margin-top:6px">
@@ -339,15 +339,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>L range <span style="color:var(--txdd)">0=snap, 1=keep image L</span></span><span class="v" id="vLRange">1.00</span></div>
+      <div class="lbl"><span>luma range <span style="color:var(--txdd)">0=snap, 1=keep image luma</span></span><span class="v" id="vLRange">1.00</span></div>
       <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image C</span></span><span class="v" id="vCRange">0.50</span></div>
+      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image chroma</span></span><span class="v" id="vCRange">0.50</span></div>
       <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma look <span style="color:var(--txdd)">L→hue bias</span></span><span class="v" id="vLumaLook">0.00</span></div>
+      <div class="lbl"><span>luma look <span style="color:var(--txdd)">luma→hue bias</span></span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
     <div class="slider" style="margin-top:6px">
@@ -356,7 +356,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl">
-        <span>L env ± <span style="color:var(--txdd)">0=snap to hull L</span></span>
+        <span>luma envelope ± <span style="color:var(--txdd)">0=snap to palette luma</span></span>
         <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="lEnvFloor" checked style="margin:0">floor</label>
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="lEnvCeil"  checked style="margin:0">ceil</label>
@@ -367,7 +367,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl">
-        <span>C env ± <span style="color:var(--txdd)">0=snap to hull C</span></span>
+        <span>chroma envelope ± <span style="color:var(--txdd)">0=snap to palette chroma</span></span>
         <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="cEnvFloor" checked style="margin:0">floor</label>
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="cEnvCeil"  checked style="margin:0">ceil</label>
@@ -1757,6 +1757,11 @@ function applyLumaLookPass(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  // Re-pin palette anchor cells to exact seed Lab — the rotation pulled
+  // every cell toward the L-conditional curve direction, including cells
+  // that landed on anchor positions. Restamping after the pass keeps the
+  // palette colors crisp in the LUT regardless of lumaLook.
+  stampAnchors(state.lutTex, N, paletteSeeds());
 }
 
 // LumaLook is a late-stage cell rotation — changing it just re-runs the
