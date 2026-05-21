@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:50:14Z">
+<meta name="build" content="2026-05-21T11:07:45Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:50:14Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T11:07:45Z</span>
   </div>
 </header>
 
@@ -3283,18 +3283,26 @@ let _huePreviewSrc = null;   // Uint8ClampedArray RGBA of un-LUTed source
 function buildHuePreviewSrc(){
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   const buf = new Uint8ClampedArray(W * H * 4);
-  // Okhsl hue × L sweep — same generator as the main hue picker test image
-  // (per-hue OkLab-gamut max chroma at uniform toed lightness per row).
+  // Mirror makeHuePickerImage so the small preview canvas matches the main
+  // 'hues' test image (Ok-HPLuv-boost with the upper-third per-hue boost +
+  // 2-pass Gaussian smoothing).
   for (let y = 0; y < H; y++){
-    const L = 100 * (1 - y / (H - 1));
+    const l = 1 - y / (H - 1);
+    const yFrac = y / (H - 1);
+    let boost = 2.0, perHue = 0;
+    if (yFrac < 1 / 3){
+      const t = 1 - yFrac * 3;
+      boost += 1.0 * t * t;
+      perHue = t * t;
+    }
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
-      const [r, g, b] = okhslToRgb(h, 1, L / 100);
+      const [r, g, b] = okhplBoostedToRgb(h, 1, l, boost, perHue);
       const i = (y * W + x) * 4;
       buf[i] = r; buf[i+1] = g; buf[i+2] = b; buf[i+3] = 255;
     }
   }
-  return _smoothHueRing(buf, W, H);
+  return _smoothHueRing(buf, W, H, 2);
 }
 
 // Lab → display sRGB byte triple. Writes 3 channels at dst[o..o+2].
