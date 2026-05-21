@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T06:42:18Z">
+<meta name="build" content="2026-05-21T06:50:35Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -222,7 +222,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette</h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T06:42:18Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T06:50:35Z</span>
   </div>
 </header>
 
@@ -311,6 +311,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <aside class="right">
   <section class="card">
     <h2>lut parameters</h2>
+    <div class="row full" style="margin-bottom:6px;display:flex;gap:4px">
+      <button data-lutmethod="soft" id="lutMethodSoft" class="tab" style="flex:1" title="Soft 3D Voronoi in OkLab via Shepard IDW + hue-curve envelope (this branch)">soft IDW</button>
+      <button data-lutmethod="main" id="lutMethodMain" class="tab" style="flex:1" title="Original main-branch hue-Voronoi stripes + global L/C clamps + smooth chroma envelope">main: stripes</button>
+    </div>
     <div class="row full" style="margin-bottom:8px">
       <button data-lutpreset="wash"      title="Extreme soft — palette adds a faint wash of color">wash</button>
       <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
@@ -541,6 +545,15 @@ const state = {
     cEnvCeil:  true,     // false = no upper-C clamp (high-chroma passthrough)
     smoothness: 2,       // 0..6 post-build Gaussian blur iterations on the LUT
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
+    // LUT build method: 'soft' = current GPU Shepard IDW bake; 'main' =
+    // ported main-branch CPU build (hue-Voronoi stripes + global L/C clamp
+    // + smooth chroma envelope + 3D blur).
+    lutMethod: 'soft',
+    // Main-method-only params (hardcoded defaults matching main).
+    mainStripeRad:  0.04,  // hue radius (rad) for stamp restamping
+    mainEnvBoost:   0,     // chroma envelope boost, %
+    mainEnvOn:      true,  // per-hue chroma envelope ceiling
+    mainEnvFloorOn: false, // per-hue chroma envelope floor
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
     // step COUNTS (≤ 32). With slider at N, each anchor walks N times in
@@ -1497,6 +1510,199 @@ function stampAnchors(targetTex, N, seeds){
 
 // Rebuild the 3D LUT on the GPU: N fragment-shader passes, one per L-slice.
 // Each pass writes an N×N (a, b) plane via framebufferTextureLayer.
+// ============================================================
+// MAIN-BRANCH LUT BUILD (alternate method, ported wholesale)
+// ============================================================
+function mainAlt_hueDist(h1, h2){
+  let d = h1 - h2;
+  while (d >  Math.PI) d -= 2*Math.PI;
+  while (d < -Math.PI) d += 2*Math.PI;
+  return Math.abs(d);
+}
+// Smooth per-hue chroma envelope: per hue h, max over seeds of
+// (s.C × triangular falloff over angular distance, 1 at seed hue, 0 at smoothRad).
+function mainAlt_buildHueEnvelope(seeds, smoothRad){
+  const NHUE = 360;
+  const env = new Float32Array(NHUE);
+  for (let i = 0; i < NHUE; i++){
+    const h = (i / NHUE) * 2 * Math.PI - Math.PI;
+    let cMax = 0;
+    for (const s of seeds){
+      const d = mainAlt_hueDist(h, s.h);
+      if (d < smoothRad){
+        const c = s.C * (1 - d / smoothRad);
+        if (c > cMax) cMax = c;
+      }
+    }
+    env[i] = cMax;
+  }
+  return function(h){
+    const f = ((h + Math.PI) / (2 * Math.PI)) * NHUE;
+    const i0 = Math.floor(f) % NHUE, i1 = (i0 + 1) % NHUE;
+    const t = f - Math.floor(f);
+    return env[i0] * (1 - t) + env[i1] * t;
+  };
+}
+function mainAlt_paletteEnvelope(seeds){
+  if (seeds.length === 0) return {Lmin: 0, Lmax: 1, Cmin: 0, Cmax: 0.4};
+  let Lmin=Infinity, Lmax=-Infinity, Cmin=Infinity, Cmax=-Infinity;
+  for (const s of seeds){
+    if (s.L < Lmin) Lmin = s.L; if (s.L > Lmax) Lmax = s.L;
+    if (s.C < Cmin) Cmin = s.C; if (s.C > Cmax) Cmax = s.C;
+  }
+  return {Lmin, Lmax, Cmin, Cmax};
+}
+function mainAlt_stampLut(L_cell, C_cell, seed_h, seedCMin, seedCMax, p){
+  const L_out = Math.max(p.lFloor, Math.min(p.lCeil, L_cell));
+  const cMax  = Math.min(p.cCeil, seedCMax);
+  const cMin  = Math.min(cMax, Math.max(p.cFloor, seedCMin));
+  const C_out = Math.max(cMin, Math.min(cMax, C_cell));
+  return [L_out, C_out * Math.cos(seed_h), C_out * Math.sin(seed_h)];
+}
+// Separable 3D blur: 5-tap Gaussian (1,4,6,4,1)/16 on a, b axes;
+// 3-tap (s, 1-2s, s) on L axis with s = wL/4 (skip when wL ≈ 0).
+function mainAlt_blur3D(data, scratch, N, wL){
+  if (wL === undefined) wL = 0.3;
+  // a axis
+  for (let li=0; li<N; li++) for (let bi=0; bi<N; bi++){
+    for (let ai=0; ai<N; ai++){
+      const am2 = Math.max(0, ai-2), am1 = Math.max(0, ai-1);
+      const ap1 = Math.min(N-1, ai+1), ap2 = Math.min(N-1, ai+2);
+      const i = ((li*N + bi)*N + ai)*3;
+      const im2 = ((li*N + bi)*N + am2)*3, im1 = ((li*N + bi)*N + am1)*3;
+      const ip1 = ((li*N + bi)*N + ap1)*3, ip2 = ((li*N + bi)*N + ap2)*3;
+      scratch[i  ] = (data[im2  ] + 4*data[im1  ] + 6*data[i  ] + 4*data[ip1  ] + data[ip2  ]) * (1/16);
+      scratch[i+1] = (data[im2+1] + 4*data[im1+1] + 6*data[i+1] + 4*data[ip1+1] + data[ip2+1]) * (1/16);
+      scratch[i+2] = (data[im2+2] + 4*data[im1+2] + 6*data[i+2] + 4*data[ip1+2] + data[ip2+2]) * (1/16);
+    }
+  }
+  // b axis
+  for (let li=0; li<N; li++){
+    for (let bi=0; bi<N; bi++){
+      const bm2 = Math.max(0, bi-2), bm1 = Math.max(0, bi-1);
+      const bp1 = Math.min(N-1, bi+1), bp2 = Math.min(N-1, bi+2);
+      for (let ai=0; ai<N; ai++){
+        const i = ((li*N + bi)*N + ai)*3;
+        const im2 = ((li*N + bm2)*N + ai)*3, im1 = ((li*N + bm1)*N + ai)*3;
+        const ip1 = ((li*N + bp1)*N + ai)*3, ip2 = ((li*N + bp2)*N + ai)*3;
+        data[i  ] = (scratch[im2  ] + 4*scratch[im1  ] + 6*scratch[i  ] + 4*scratch[ip1  ] + scratch[ip2  ]) * (1/16);
+        data[i+1] = (scratch[im2+1] + 4*scratch[im1+1] + 6*scratch[i+1] + 4*scratch[ip1+1] + scratch[ip2+1]) * (1/16);
+        data[i+2] = (scratch[im2+2] + 4*scratch[im1+2] + 6*scratch[i+2] + 4*scratch[ip1+2] + scratch[ip2+2]) * (1/16);
+      }
+    }
+  }
+  // L axis (skip if wL very small)
+  if (wL <= 1e-4) return;
+  const sideW = wL * 0.25, ctrW = 1 - 2*sideW;
+  for (let li=0; li<N; li++){
+    const lm = Math.max(0, li-1), lp = Math.min(N-1, li+1);
+    for (let bi=0; bi<N; bi++) for (let ai=0; ai<N; ai++){
+      const i  = ((li*N + bi)*N + ai)*3;
+      const im = ((lm*N + bi)*N + ai)*3;
+      const ip = ((lp*N + bi)*N + ai)*3;
+      scratch[i  ] = sideW * data[im  ] + ctrW * data[i  ] + sideW * data[ip  ];
+      scratch[i+1] = sideW * data[im+1] + ctrW * data[i+1] + sideW * data[ip+1];
+      scratch[i+2] = sideW * data[im+2] + ctrW * data[i+2] + sideW * data[ip+2];
+    }
+  }
+  data.set(scratch);
+}
+// Main-style LUT builder. Returns Float32Array length N×N×N×3 (Lab per cell,
+// z-major: ((li*N+bi)*N+ai)*3).
+function mainAlt_buildLut(N){
+  const p = state.params;
+  // Seeds: user-curated anchors only (skip synth blackpoint / whitepoint).
+  // Add hue + chroma fields main expects.
+  const palSeeds = paletteSeeds().filter(s => !s.synthetic).map(s => ({
+    L: s.L, a: s.a, b: s.b, h: Math.atan2(s.b, s.a),
+    C: Math.hypot(s.a, s.b), synthetic: false,
+  }));
+  if (palSeeds.length === 0) return null;
+  const seeds = palSeeds;  // synth extension via current paletteSeeds path is skipped here
+
+  const env = mainAlt_paletteEnvelope(seeds);
+  // Resolve clamp values from envelope (no separate sliders in this branch
+  // for main's lFloor/lCeil/cFloor/cCeil — use palette extremes directly).
+  const stamp_p = {lFloor: env.Lmin, lCeil: env.Lmax, cFloor: 0, cCeil: 0.40};
+  const stripeRad = p.mainStripeRad;
+  const iters = Math.max(1, Math.round(p.smoothness || 1));
+  const boost = 1 + (p.mainEnvBoost || 0) / 100;
+  const envNeeded = p.mainEnvOn || p.mainEnvFloorOn;
+  const cEnvFn = envNeeded ? mainAlt_buildHueEnvelope(seeds, stripeRad * 4) : null;
+  const capAt   = h => (p.mainEnvOn && cEnvFn) ? cEnvFn(h) * boost : Infinity;
+  const floorAt = h => (p.mainEnvFloorOn && cEnvFn) ? cEnvFn(h) : 0;
+
+  const cellL  = idx => idx / (N - 1);
+  const cellAB = idx => -LUT_AB_RANGE + (idx / (N - 1)) * (2 * LUT_AB_RANGE);
+  const data = new Float32Array(N*N*N*3);
+  const scratch = new Float32Array(N*N*N*3);
+
+  // Initial Voronoi fill by hue distance
+  for (let li=0; li<N; li++){
+    const L_cell = cellL(li);
+    for (let bi=0; bi<N; bi++){
+      const b_cell = cellAB(bi);
+      for (let ai=0; ai<N; ai++){
+        const a_cell = cellAB(ai);
+        const C_cell = Math.hypot(a_cell, b_cell);
+        const h_cell = Math.atan2(b_cell, a_cell);
+        let best = seeds[0], bestD = mainAlt_hueDist(h_cell, seeds[0].h);
+        for (let k=1; k<seeds.length; k++){
+          const d = mainAlt_hueDist(h_cell, seeds[k].h);
+          if (d < bestD){ bestD = d; best = seeds[k]; }
+        }
+        const out = mainAlt_stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
+        const idx = ((li*N + bi)*N + ai)*3;
+        data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
+      }
+    }
+  }
+  // Iterate: blur + restamp stripe cells
+  const wL = 0.3;
+  for (let it=0; it<iters; it++){
+    mainAlt_blur3D(data, scratch, N, wL);
+    for (let li=0; li<N; li++){
+      const L_cell = cellL(li);
+      for (let bi=0; bi<N; bi++){
+        const b_cell = cellAB(bi);
+        for (let ai=0; ai<N; ai++){
+          const a_cell = cellAB(ai);
+          const C_cell = Math.hypot(a_cell, b_cell);
+          const h_cell = Math.atan2(b_cell, a_cell);
+          let best = null, bestD = stripeRad;
+          for (const s of seeds){
+            const d = mainAlt_hueDist(h_cell, s.h);
+            if (d < bestD){ bestD = d; best = s; }
+          }
+          if (best){
+            const out = mainAlt_stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
+            const idx = ((li*N + bi)*N + ai)*3;
+            data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
+          }
+        }
+      }
+    }
+  }
+  mainAlt_blur3D(data, scratch, N, wL);
+  return data;
+}
+// Upload CPU-built Lab cells to state.lutTex. Lab → texel as RGBA Float32
+// (alpha = 1.0 ignored). Layout matches WebGL2 3D texture pixel order:
+// z = L slice (depth), y = b row (height), x = a col (width).
+function mainAlt_uploadLut(data, N){
+  const gl = state.gl;
+  const rgba = new Float32Array(N*N*N*4);
+  for (let i = 0, j = 0; i < N*N*N; i++, j += 3){
+    const o = i*4;
+    rgba[o]   = data[j];
+    rgba[o+1] = data[j+1];
+    rgba[o+2] = data[j+2];
+    rgba[o+3] = 1.0;
+  }
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
+  gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, N, N, N, gl.RGBA, gl.FLOAT, rgba);
+}
+
 function recomputeLut(){
   const gl = state.gl;
   if (!gl) return;
@@ -1520,6 +1726,17 @@ function recomputeLut(){
   state.hueLCCurve = computeHueLCCurve(seeds);
   uploadHueLCCurve(state.hueLCCurve);
   ensureLutTexture(N);
+
+  // Method tab: main-style CPU build short-circuits the soft IDW GPU bake.
+  if (state.params.lutMethod === 'main'){
+    const data = mainAlt_buildLut(N);
+    if (data) mainAlt_uploadLut(data, N);
+    state.lutBuildMs = performance.now() - t0;
+    updateLutStatus();
+    renderHuePreview();
+    requestRender();
+    return;
+  }
 
   const prog = state.programs.lutBuild;
   gl.useProgram(prog);
@@ -3662,6 +3879,19 @@ function init(){
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
     btn.addEventListener('click', () => applyLutPreset(btn.dataset.lutpreset));
   });
+  function refreshLutMethodBtns(){
+    document.querySelectorAll('[data-lutmethod]').forEach(b => {
+      b.classList.toggle('active', b.dataset.lutmethod === state.params.lutMethod);
+    });
+  }
+  document.querySelectorAll('[data-lutmethod]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.params.lutMethod = btn.dataset.lutmethod;
+      refreshLutMethodBtns();
+      scheduleLutRebuild();
+    });
+  });
+  refreshLutMethodBtns();
 
   // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
   // Slider == 0 disables that axis. Number of inserts per gap is automatic
