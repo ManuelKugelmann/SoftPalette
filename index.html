@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:02:21Z">
+<meta name="build" content="2026-05-21T09:04:51Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -22,27 +22,28 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.5}
-body{min-height:100vh;display:flex;flex-direction:column}
+body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 a{color:var(--ac)}
 
 header{
   display:flex;align-items:center;justify-content:space-between;
   padding:10px 16px;border-bottom:1px solid var(--bd);
   background:linear-gradient(180deg,var(--bg2),var(--bg));
+  flex:none;
 }
 header h1{margin:0;font-size:13px;font-weight:500;letter-spacing:0.04em}
 header h1 .dim{color:var(--txd)}
 header .meta{font-size:11px;color:var(--txd)}
 
 main{
-  flex:1;display:grid;grid-template-columns:300px 1fr 340px;
-  gap:8px;padding:8px;min-height:0;
+  flex:1 1 auto;display:grid;grid-template-columns:300px 1fr 340px;
+  gap:8px;padding:8px;min-height:0;overflow:hidden;
 }
 @media (max-width:1200px){
-  main{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  main{grid-template-columns:1fr;grid-template-rows:auto auto auto;overflow:auto}
 }
 
-aside,section.center{display:flex;flex-direction:column;gap:8px;min-width:0}
+aside,section.center{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow-y:auto}
 /* Right-side aside gets extra horizontal gutter so a finger can land on
    empty space to scroll without accidentally grabbing a slider. */
 aside.right{padding-right:24px}
@@ -220,9 +221,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <body>
 
 <header>
-  <h1>SoftPalette</h1>
+  <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:02:21Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:04:51Z</span>
   </div>
 </header>
 
@@ -326,34 +327,43 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
       <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
     </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma tol <span style="color:var(--txdd)">anchor pull radius along luma</span></span><span class="v" id="vLTol">0.50</span></div>
-      <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
+
+    <!-- Build-stage params for the selected method. Ordered to match
+         pipeline use: IDW (Voronoi build params) OR Stripes (stripe thickness). -->
+    <div id="idwControls">
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>luma tol <span style="color:var(--txdd)">anchor pull radius along luma</span></span><span class="v" id="vLTol">0.50</span></div>
+        <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>chroma tol <span style="color:var(--txdd)">anchor pull radius across chroma</span></span><span class="v" id="vAbTol">0.20</span></div>
+        <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>softness <span style="color:var(--txdd)">↑=soft</span></span><span class="v" id="vSoftness">9.0</span></div>
+        <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>luma range <span style="color:var(--txdd)">0=snap, 1=keep image luma</span></span><span class="v" id="vLRange">1.00</span></div>
+        <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image chroma</span></span><span class="v" id="vCRange">0.50</span></div>
+        <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>reach <span style="color:var(--txdd)">desat outside</span></span><span class="v" id="vReach">0.25</span></div>
+        <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
+      </div>
     </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma tol <span style="color:var(--txdd)">anchor pull radius across chroma</span></span><span class="v" id="vAbTol">0.20</span></div>
-      <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
+    <div id="stripesControls" style="display:none">
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>stripe thickness <span style="color:var(--txdd)">hue radius (rad)</span></span><span class="v" id="vStripeRad">0.04</span></div>
+        <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
+      </div>
     </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>softness <span style="color:var(--txdd)">↑=soft</span></span><span class="v" id="vSoftness">9.0</span></div>
-      <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma range <span style="color:var(--txdd)">0=snap, 1=keep image luma</span></span><span class="v" id="vLRange">1.00</span></div>
-      <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image chroma</span></span><span class="v" id="vCRange">0.50</span></div>
-      <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma look <span style="color:var(--txdd)">luma→hue bias</span></span><span class="v" id="vLumaLook">0.00</span></div>
-      <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>reach <span style="color:var(--txdd)">desat outside</span></span><span class="v" id="vReach">0.25</span></div>
-      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
-    </div>
+
+    <!-- Envelope clamp (shared) -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl">
         <span>luma envelope ± <span style="color:var(--txdd)">0=snap to palette luma</span></span>
@@ -376,23 +386,23 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       </div>
       <input type="range" id="cExt" min="0" max="0.4" step="0.005" value="0.40">
     </div>
+
+    <!-- Smooth pass (after envelope clamp, before luma look) -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">blur+restamp iters (toward harmonic limit)</span></span><span class="v" id="vSmoothness">0</span></div>
+      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">blur+restamp iters</span></span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="30" step="1" value="0">
     </div>
+
+    <!-- Luma look (late stage, fires only outside envelope) -->
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>luma look <span style="color:var(--txdd)">luma→hue bias outside envelope</span></span><span class="v" id="vLumaLook">0.00</span></div>
+      <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
+    </div>
+
+    <!-- Final blend with identity -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>lut strength <span style="color:var(--txdd)">blend with identity</span></span><span class="v" id="vLutStrength">100%</span></div>
       <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
-    </div>
-
-    <!-- Stripes-method-only controls. Hidden under IDW. -->
-    <div id="stripesControls" style="display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
-      <div class="note" style="margin-bottom:6px;color:var(--txd)">Stripes-only</div>
-      <div class="slider">
-        <div class="lbl"><span>stripe thickness <span style="color:var(--txdd)">hue radius (rad)</span></span><span class="v" id="vStripeRad">0.04</span></div>
-        <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
-      </div>
-      <div class="note" style="margin-top:6px;color:var(--txdd);font-size:11px">Chroma / luma envelope: use the shared L&nbsp;env / C&nbsp;env sliders above.</div>
     </div>
 
     <div class="note" id="lutStatus" style="margin-top:6px"></div>
@@ -419,7 +429,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 </main>
 
-<footer><span style="color:var(--txd)">SoftPalette by Manuel Kugelmann - Bitcraft IT Consulting</span></footer>
 
 <script>
 'use strict';
@@ -4011,8 +4020,11 @@ function init(){
     document.querySelectorAll('[data-lutmethod]').forEach(b => {
       b.classList.toggle('active', b.dataset.lutmethod === state.params.lutMethod);
     });
+    const idwUI     = document.getElementById('idwControls');
     const stripesUI = document.getElementById('stripesControls');
-    if (stripesUI) stripesUI.style.display = state.params.lutMethod === 'stripes' ? '' : 'none';
+    const isStripes = state.params.lutMethod === 'stripes';
+    if (idwUI)     idwUI.style.display     = isStripes ? 'none' : '';
+    if (stripesUI) stripesUI.style.display = isStripes ? '' : 'none';
   }
   document.querySelectorAll('[data-lutmethod]').forEach(btn => {
     btn.addEventListener('click', () => {
