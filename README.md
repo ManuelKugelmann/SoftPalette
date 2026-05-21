@@ -29,11 +29,8 @@ Maps any discrete palette into a soft 3D LUT — gradients stay continuous, gaps
 | **extend palette** | Optional auto-extension: each palette anchor stamps an N×N (L, C) constellation at its hue. `grid` chooses 1 (off), 3 (9 entries / anchor), 5, or 7. `L spread` and `chroma spread` set the ±range per axis. Total seeds are capped to 256 |
 | **IDW / Stripes** (tabs) | Choose the LUT-build method. |
 | **lut size** | Cube edge: 17 / 33 / 65 / 129 / 257 (production-standard sizes; odd values keep neutral grey cell-centered) |
-
 | **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
-
-### IDW
-| Control | What it does |
+| IDW | |
 |---|---|
 | **L tolerance (σ_L)** | Anchor's pull radius along the L axis. Small = tight luminance "stripe", large = anchor reaches across the L range |
 | **chroma tolerance (σ_ab)** | Anchor's pull radius across the A/B (chroma) plane. Small = tight color stripe, large = washy blending |
@@ -43,8 +40,7 @@ Maps any discrete palette into a soft 3D LUT — gradients stay continuous, gaps
 | **L env ± / C env ±** (with `floor` / `ceil` toggles) | Per-hue envelope half-width. Bounds come from a Gaussian-weighted soft-min/soft-max of palette anchor L (and C) within the local hue radius. Output is hard-clamped to `[envLLo − lExt, envLHi + lExt]` and analogously for chroma. The `floor` / `ceil` toggles disable that side individually |
 | **smoothness** | Gaussian blur iterations |
 | **luma look** | L→hue bias. 0 = off; 1 = pre-shift each cell's (a, b) fully toward the palette's L-conditional mean hue. Captures the teal-orange-style "cool shadows, warm highlights" automatically from the palette's L→(a,b) profile |
-
-### Stripes
+| Stripes | |
 | Control | What it does |
 |---|---|
 | **stripe thickness** | Hue radius (rad) for the stripe stamp pass. Cells within this angular distance of a seed's hue get hue-snapped to that seed |
