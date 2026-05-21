@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:12:17Z">
+<meta name="build" content="2026-05-21T10:13:33Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:12:17Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:13:33Z</span>
   </div>
 </header>
 
@@ -272,15 +272,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
     </label>
     <div class="slider" id="extendHWrap" style="margin-top:8px">
-      <div class="lbl"><span>hue gap <span style="color:var(--txdd)">rad, 6.28 = off</span></span><span class="v" id="vExtendH">6.28</span></div>
+      <div class="lbl"><span>hue gap</span><span class="v" id="vExtendH">6.28</span></div>
       <input type="range" id="extendH" min="0" max="6.28" step="0.05" value="6.28">
     </div>
     <div class="slider" id="extendCWrap" style="margin-top:6px">
-      <div class="lbl"><span>chroma steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendC">1</span></div>
+      <div class="lbl"><span>chroma steps</span><span class="v" id="vExtendC">1</span></div>
       <input type="range" id="extendC" min="0" max="8" step="1" value="1">
     </div>
     <div class="slider" id="extendLWrap" style="margin-top:6px">
-      <div class="lbl"><span>luma steps <span style="color:var(--txdd)">/dir, 8 = full range</span></span><span class="v" id="vExtendL">1</span></div>
+      <div class="lbl"><span>luma steps</span><span class="v" id="vExtendL">1</span></div>
       <input type="range" id="extendL" min="0" max="8" step="1" value="1">
     </div>
     <div class="note" id="extendStatus" style="margin-top:4px"></div>
@@ -320,7 +320,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutmethod="idw" id="lutMethodIdw" class="tab" style="flex:1" title="Soft 3D Voronoi in OkLab via Shepard IDW + hue-curve envelope">IDW</button>
       <button data-lutmethod="stripes" id="lutMethodStripes" class="tab" style="flex:1" title="Hue-Voronoi stripes + global L/C clamps + smooth chroma envelope">Stripes</button>
     </div>
-    <div class="row full" style="margin-bottom:8px">
+    <div class="row full" style="margin-bottom:8px;display:flex;flex-wrap:nowrap;gap:4px">
       <button data-lutpreset="wash"      title="Extreme soft — palette adds a faint wash of color">wash</button>
       <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
       <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
@@ -340,33 +340,33 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
          pipeline use: IDW (Voronoi build params) OR Stripes (stripe thickness). -->
     <div id="idwControls">
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>luma tol <span style="color:var(--txdd)">anchor pull radius along luma</span></span><span class="v" id="vLTol">0.50</span></div>
+        <div class="lbl"><span>luma tol</span><span class="v" id="vLTol">0.50</span></div>
         <input type="range" id="lTol" min="0.05" max="1.5" step="0.01" value="0.50">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>chroma tol <span style="color:var(--txdd)">anchor pull radius across chroma</span></span><span class="v" id="vAbTol">0.20</span></div>
+        <div class="lbl"><span>chroma tol</span><span class="v" id="vAbTol">0.20</span></div>
         <input type="range" id="abTol" min="0.02" max="1.0" step="0.005" value="0.20">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>softness <span style="color:var(--txdd)">↑=soft</span></span><span class="v" id="vSoftness">9.0</span></div>
+        <div class="lbl"><span>softness</span><span class="v" id="vSoftness">9.0</span></div>
         <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>luma range <span style="color:var(--txdd)">0=snap, 1=keep image luma</span></span><span class="v" id="vLRange">1.00</span></div>
+        <div class="lbl"><span>luma range</span><span class="v" id="vLRange">1.00</span></div>
         <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>chroma range <span style="color:var(--txdd)">0=snap, 1=keep image chroma</span></span><span class="v" id="vCRange">0.50</span></div>
+        <div class="lbl"><span>chroma range</span><span class="v" id="vCRange">0.50</span></div>
         <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>reach <span style="color:var(--txdd)">desat outside</span></span><span class="v" id="vReach">0.25</span></div>
+        <div class="lbl"><span>reach</span><span class="v" id="vReach">0.25</span></div>
         <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
       </div>
     </div>
     <div id="stripesControls" style="display:none">
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>stripe thickness <span style="color:var(--txdd)">hue radius (rad)</span></span><span class="v" id="vStripeRad">0.04</span></div>
+        <div class="lbl"><span>stripe thickness</span><span class="v" id="vStripeRad">0.04</span></div>
         <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
       </div>
     </div>
@@ -374,7 +374,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <!-- Envelope clamp (shared) -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl">
-        <span>luma envelope ± <span style="color:var(--txdd)">0=snap to palette luma</span></span>
+        <span>luma envelope ±</span>
         <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="lEnvFloor" checked style="margin:0">floor</label>
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="lEnvCeil"  checked style="margin:0">ceil</label>
@@ -385,7 +385,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl">
-        <span>chroma envelope ± <span style="color:var(--txdd)">0=snap to palette chroma</span></span>
+        <span>chroma envelope ±</span>
         <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)">
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="cEnvFloor" checked style="margin:0">floor</label>
           <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="cEnvCeil"  checked style="margin:0">ceil</label>
@@ -397,19 +397,19 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
     <!-- Smooth pass (after envelope clamp, before luma look) -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>smoothness <span style="color:var(--txdd)">blur+restamp iters</span></span><span class="v" id="vSmoothness">0</span></div>
+      <div class="lbl"><span>smoothness</span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="30" step="1" value="0">
     </div>
 
     <!-- Luma look (late stage, fires only outside envelope) -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma look <span style="color:var(--txdd)">luma→hue bias outside envelope</span></span><span class="v" id="vLumaLook">0.00</span></div>
+      <div class="lbl"><span>luma look</span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
 
     <!-- Final blend with identity -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>lut strength <span style="color:var(--txdd)">blend with identity</span></span><span class="v" id="vLutStrength">100%</span></div>
+      <div class="lbl"><span>lut strength</span><span class="v" id="vLutStrength">100%</span></div>
       <input type="range" id="lutStrength" min="0" max="100" step="1" value="100">
     </div>
 
