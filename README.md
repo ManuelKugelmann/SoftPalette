@@ -28,10 +28,10 @@ Two algorithms — pick one with the tabs at the top of the LUT params card.
 **IDW** blends every palette anchor with distance-weighted falloff. Smooth,
 painterly transitions between hues.
 
-**Stripes** rasterises each anchor as a 1-cell-wide hue stripe (along its
-hue ray in OkLab), weighted strongest at the anchor's L / chroma. Iterated
-blur diffuses the stripes outward into the neutral background. Graphical,
-posterised look with distinct hue regions.
+**Stripes** snaps every cell to its nearest palette hue (Voronoi by hue
+distance), keeping the cell's own L and chroma magnitude. Then iterates
+`stripe iters` times: blur the whole cube, restamp only cells near a
+seed hue. Graphical, posterised look with distinct hue regions.
 
 Both methods share the same controls and presets — only step 1 of the
 build differs (IDW Shepard bake vs Stripes hue-ray stamps).
@@ -46,7 +46,8 @@ build differs (IDW Shepard bake vs Stripes hue-ray stamps).
 | luma anchor range / chroma anchor range | Anchor pull radius in luma vs chroma. Tight = sharp regions, wide = washy blends |
 | anchor softness | IDW: Shepard exponent (low = mushy, high = near-Voronoi). Stripes: unused |
 | reach | Distance beyond which the palette gives up — far-out colors desaturate instead of latching to a wrong hue |
-| anchor hue range | IDW: soft hue-gate width. Stripes: hue-stripe stamp tolerance |
+| anchor hue range | IDW: soft hue-gate width. Stripes: restamp tolerance during iters (cells within this hue distance of a seed get restamped after each blur) |
+| stripe iters | Stripes only: number of (blur → restamp narrow stripes) iterations after the initial Voronoi rotation. 0 = raw Voronoi rotation, higher = smoother bleed between hue regions |
 | luma blend / chroma blend | Keep image structure (1) or snap to palette values (0) on each axis |
 | luma envelope ± + floor / ceil | Limit how far output luma can go from the palette's natural luma range. Toggle floor / ceil to disable that side |
 | chroma envelope ± + floor / ceil | Same idea for chroma — limit how saturated outputs can get relative to the palette |
@@ -62,17 +63,15 @@ position in OkLab space — and the image is mapped through it on the GPU.
 - **IDW**: each LUT cell is a distance-weighted blend of all palette anchors
   in OkLab, with chroma kept honest where anchors agree on a hue and falling
   back to grey where they don't. Built entirely on the GPU.
-- **Stripes**: starts with a palette-mean fill, then rasterises each
-  anchor's hue ray as a 1-cell-wide stripe across the (a, b) plane.
-  Stripe cells get a Gaussian-weighted blend of same-hue anchors in (L,
-  chroma) space — strongest at the anchor's exact position, interpolating
-  smoothly between same-hue anchors at different L or C, fading back to
-  neutral elsewhere. Built on the CPU and uploaded.
+- **Stripes**: every cell gets Voronoi-snapped to its nearest seed's hue
+  (cell keeps its own L and chroma magnitude). Then `stripe iters`
+  iterations of (3D blur the whole cube, restamp cells within
+  `anchor hue range` of any seed) interleave smoothing with hue locking.
+  Built on the CPU and uploaded.
 
 After step 1, both methods run the **identical** late-stage pipeline:
 anchor stamp → smoothness blur+restamp loop → reach desaturation → luma
-look. For Stripes the blur loop is also what diffuses the 1-cell stripes
-out into the neutral background — at `blur = 0` you see the raw stripes.
+look.
 
 After either build, **luma look** runs as a late stage that rotates each
 non-anchor cell's chroma direction toward the palette's natural dark /
