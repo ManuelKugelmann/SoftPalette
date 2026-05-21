@@ -8,10 +8,14 @@ construction.
 - **Live (GitHub Pages, main branch)**: <https://manuelkugelmann.github.io/SoftPalette/>
 - **This branch (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
 
-The "This branch" link is kept in sync automatically by a `pre-commit` hook
-in `.githooks/`. Enable it once per clone with `git config core.hooksPath
-.githooks` — afterwards every commit rewrites the URL to match the branch
-checked out. To re-sync manually, run `scripts/sync-readme-branch.sh`.
+The "This branch" link is kept in sync automatically:
+- **Locally**: enable the tracked pre-commit hook once per clone with
+  `git config core.hooksPath .githooks`. Re-sync manually with
+  `scripts/sync-readme-branch.sh`.
+- **Server-side**: a GitHub Actions workflow
+  (`.github/workflows/sync-readme-branch.yml`) runs on every push, rewrites
+  the link to match `github.ref_name`, and pushes the fix back. Skips
+  itself via `[skip readme-sync]` in its own commit messages, so no loop.
 
 ## Usage
 - Drop an image.
@@ -97,6 +101,41 @@ The LUT bake runs entirely on the GPU:
    `(a, b)` plane via `framebufferTextureLayer`. `N` passes total.
 4. The per-pixel display shader samples `sampler3D` with hardware LINEAR
    filtering (trilinear Lab interpolation), converts back to sRGB.
+
+## Alternate algorithm: `main: stripes` (ported from main branch)
+A second LUT-build method is selectable from the `soft IDW` / `main:
+stripes` tab pair at the top of the LUT params card. `main: stripes`
+ports the original main-branch algorithm wholesale and is built on the
+CPU instead of the GPU, then uploaded to the same 3D LUT texture so the
+rest of the pipeline (per-pixel shader, hue preview, slice preview) is
+unchanged.
+
+1. **Seeds**: each palette color → an OkLab cell, stored as `(L, a, b, h, C)`.
+   Synthetic blackpoint / whitepoint anchors are skipped (the main-branch
+   algorithm doesn't use them).
+2. **Voronoi by hue**: every LUT cell is initially assigned to its nearest
+   palette seed by angular hue distance and stamped with `stampLut` (clamps
+   output L to the palette's L extremes, output chroma to the per-hue
+   envelope).
+3. **Stripe stamping**: cells inside a seed's hue stripe (radius
+   `mainStripeRad`, default 0.04 rad ≈ 2.3°) get their hue snapped to that
+   seed's hue, with chroma capped at the envelope.
+4. **Iterative blur**: separable 3D Gaussian — 5-tap `(1, 4, 6, 4, 1)/16`
+   on the chroma axes, 3-tap `(s, 1−2s, s)` with `s = wL/4` on the L axis
+   (anisotropic: chroma blurs more than lightness). Followed by re-stamping
+   stripe cells. Repeats `smoothness` times. This is what produces smooth
+   gradients between anchors.
+5. **Smooth chroma envelope**: a per-hue chroma ceiling, built as
+   `max over seeds of (s.C × max(0, 1 − d_hue/(4·stripeRad)))`. Optional
+   `mainEnvBoost` inflates uniformly; an optional floor lifts low-chroma
+   cells to the envelope rather than passing them through.
+6. **Final cosmetic blur** hides the last stamp discontinuities.
+
+The two methods produce visibly different looks: `soft IDW` blends every
+anchor with weighted-distance falloff (smooth, painterly), while `main:
+stripes` snaps each cell to its nearest anchor's hue and relies on the
+iterated blur to bridge transitions (graphical, posterised, distinct
+hue "regions").
 
 Build cost is roughly `O(N³ × |palette|)` GPU work. On modern hardware,
 33³ is sub-millisecond and 257³ at 256 seeds completes in a few ms.
