@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T11:16:19Z">
+<meta name="build" content="2026-05-21T11:18:41Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T11:16:19Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T11:18:41Z</span>
   </div>
 </header>
 
@@ -361,10 +361,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       </div>
     </div>
     <div id="stripesControls" style="display:none">
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>stripe softness</span><span class="v" id="vStripeSoftness">0.00</span></div>
-        <input type="range" id="stripeSoftness" min="0" max="1" step="0.01" value="0.0">
-      </div>
       <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>stripe iters</span><span class="v" id="vStripeIters">2</span></div>
         <input type="range" id="stripeIters" min="0" max="12" step="1" value="2">
@@ -606,7 +602,6 @@ const state = {
     // Stripes-method params.
     hRange:         1.5708,// shared anchor hue range (rad). IDW: Gaussian gate
                           //   scale; Stripes: hard cutoff for the stamp pass.
-    stripeSoftness: 0.0,   // 0 = hard stripe edge (binary); 1 = full triangular falloff
     stripeIters:    2,     // Stripes-specific anchor pull (iter count)
     // Envelope (lExt / cExt / lEnvFloor / lEnvCeil / cEnvFloor / cEnvCeil) is
     // shared with IDW — Stripes reuses the same controls.
@@ -1724,10 +1719,9 @@ function stripes_buildLut(N){
   const lFloor = lFloorOn ? Math.max(0, env.Lmin - lExt) : 0;
   const lCeil  = lCeilOn  ? Math.min(1, env.Lmax + lExt) : 1;
   const stamp_p = {lFloor, lCeil, cFloor: 0, cCeil: 0.40};
-  const hRange         = p.hRange || (Math.PI / 2);
-  const lRangeCut      = p.lTol || 1.0;     // shared L cutoff (was IDW-only)
-  const abRangeCut     = p.abTol || 1.0;    // shared C cutoff (was IDW-only)
-  const stripeSoftness = Math.max(0, Math.min(1, p.stripeSoftness || 0));
+  const hRange    = p.hRange || (Math.PI / 2);
+  const lRangeCut = p.lTol || 1.0;   // shared L cutoff (was IDW-only)
+  const abRangeCut = p.abTol || 1.0; // shared C cutoff (was IDW-only)
   // debugBlur off → skip the iter loop (just the initial Voronoi fill).
   const iters = p.debugBlur !== false ? Math.max(1, Math.round(p.smoothness || 1)) : 0;
   const cEnvFn = stripes_buildHueEnvelope(seeds, hRange * 4);
@@ -1774,31 +1768,37 @@ function stripes_buildLut(N){
           const a_cell = cellAB(ai);
           const C_cell = Math.hypot(a_cell, b_cell);
           const h_cell = Math.atan2(b_cell, a_cell);
-          // Find best seed within (hRange × lTol × abTol) ellipsoid.
-          let best = null, bestD = hRange;
+          // Weighted-mix stamp: sum contributions from EVERY seed within
+          // the (hRange × lTol × abTol) ellipsoid, weighted by triangular
+          // falloff on each axis. Order-independent — the normalized
+          // weighted average is commutative across anchors.
+          let sumW = 0, sumL = 0, sumA = 0, sumB = 0;
           for (const s of seeds){
             const d_h = stripes_hueDist(h_cell, s.h);
             if (d_h >= hRange) continue;
-            if (Math.abs(L_cell - s.L) > lRangeCut) continue;
+            const d_L = Math.abs(L_cell - s.L);
+            if (d_L >= lRangeCut) continue;
             const seedC = Math.hypot(s.a, s.b);
-            if (Math.abs(C_cell - seedC) > abRangeCut) continue;
-            if (d_h < bestD){ bestD = d_h; best = s; }
+            const d_C = Math.abs(C_cell - seedC);
+            if (d_C >= abRangeCut) continue;
+            const wH = 1 - d_h / hRange;
+            const wL = 1 - d_L / lRangeCut;
+            const wC = 1 - d_C / abRangeCut;
+            const w  = wH * wL * wC;
+            if (w <= 1e-6) continue;
+            const out = stripes_stampLut(L_cell, C_cell, s.h, s.L, seedC, floorAt(s.h), capAt(s.h), stamp_p, p.lRange, p.cRange);
+            sumW += w;
+            sumL += w * out[0];
+            sumA += w * out[1];
+            sumB += w * out[2];
           }
-          if (best){
-            // Soft stripe falloff over hue distance.
-            const t = bestD / hRange;
-            const kneeStart = 1 - stripeSoftness;
-            const w = t < kneeStart
-              ? 1
-              : Math.max(0, 1 - (t - kneeStart) / Math.max(1e-6, 1 - kneeStart));
-            if (w > 1e-6){
-              const out = stripes_stampLut(L_cell, C_cell, best.h, best.L, best.C, floorAt(best.h), capAt(best.h), stamp_p, p.lRange, p.cRange);
-              const idx = ((li*N + bi)*N + ai)*3;
-              data[idx  ] = data[idx  ] * (1 - w) + out[0] * w;
-              data[idx+1] = data[idx+1] * (1 - w) + out[1] * w;
-              data[idx+2] = data[idx+2] * (1 - w) + out[2] * w;
-            }
+          if (sumW > 1e-6){
+            const idx = ((li*N + bi)*N + ai)*3;
+            data[idx  ] = sumL / sumW;
+            data[idx+1] = sumA / sumW;
+            data[idx+2] = sumB / sumW;
           }
+          // else: leave cell as-is (no anchor in range — passes through).
         }
       }
     }
@@ -3333,22 +3333,38 @@ function _writeLabToRGBA(dst, o, L, a, b){
 // closest seed's (L, C) at the seed's hue direction.
 function rawStripesLab(L, a, b, seeds){
   if (seeds.length === 0) return [L, a, b];
+  const p = state.params;
+  const hRange = p.hRange || (Math.PI / 2);
+  const lRangeCut = p.lTol || 1.0;
+  const abRangeCut = p.abTol || 1.0;
   const TWO_PI = 2 * Math.PI;
   const PI = Math.PI;
   const h_cell = Math.atan2(b, a);
-  let bestD = Infinity, best = null;
+  const C_cell = Math.hypot(a, b);
+  let sumW = 0, sumL = 0, sumA = 0, sumB = 0;
   for (const s of seeds){
     const seedC = Math.hypot(s.a, s.b);
     if (seedC < 0.005) continue;
     const seedH = Math.atan2(s.b, s.a);
-    let d = Math.abs(h_cell - seedH);
-    if (d > PI) d = TWO_PI - d;
-    if (d < bestD){ bestD = d; best = s; }
+    let d_h = Math.abs(h_cell - seedH);
+    if (d_h > PI) d_h = TWO_PI - d_h;
+    if (d_h >= hRange) continue;
+    const d_L = Math.abs(L - s.L);
+    if (d_L >= lRangeCut) continue;
+    const d_C = Math.abs(C_cell - seedC);
+    if (d_C >= abRangeCut) continue;
+    const wH = 1 - d_h / hRange;
+    const wL = 1 - d_L / lRangeCut;
+    const wC = 1 - d_C / abRangeCut;
+    const w  = wH * wL * wC;
+    if (w <= 1e-6) continue;
+    sumW += w;
+    sumL += w * s.L;
+    sumA += w * seedC * Math.cos(seedH);
+    sumB += w * seedC * Math.sin(seedH);
   }
-  if (!best) return [L, a, b];
-  const seedH = Math.atan2(best.b, best.a);
-  const seedC = Math.hypot(best.a, best.b);
-  return [best.L, seedC * Math.cos(seedH), seedC * Math.sin(seedH)];
+  if (sumW <= 1e-6) return [L, a, b];
+  return [sumL / sumW, sumA / sumW, sumB / sumW];
 }
 
 // Raw-IDW preview pass — Shepard IDW + soft hue gate + chroma-preserve only.
@@ -4204,7 +4220,6 @@ function init(){
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
     hRange:         ['hRange',         'vHRange',         v => v.toFixed(2)],
-    stripeSoftness: ['stripeSoftness', 'vStripeSoftness', v => v.toFixed(2)],
     stripeIters:    ['stripeIters',    'vStripeIters',    v => v.toFixed(0)],
   };
   const envToggleMap = {
@@ -4267,7 +4282,7 @@ function init(){
     // IDW build params
     'lTol', 'abTol', 'softness', 'lRange', 'cRange', 'reach',
     // Stripes build params
-    'stripeSoftness', 'stripeIters',
+    'stripeIters',
     // Shared anchor hue range
     'hRange',
     // Shared envelope
@@ -4384,7 +4399,6 @@ function init(){
   refreshLutMethodBtns();
   // Stripes-only sliders + toggles.
   bindLutSlider('hRange',         'vHRange',         'hRange',         v => v.toFixed(2));
-  bindLutSlider('stripeSoftness', 'vStripeSoftness', 'stripeSoftness', v => v.toFixed(2));
   bindLutSlider('stripeIters',    'vStripeIters',    'stripeIters',    v => v.toFixed(0));
 
   function bindStripesToggle(id, key){
