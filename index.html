@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T15:54:05Z">
+<meta name="build" content="2026-05-21T15:56:32Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:54:05Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:56:32Z</span>
   </div>
 </header>
 
@@ -426,7 +426,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugStamps"   checked style="margin:0">anchor stamps</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugBlur"     checked style="margin:0">blur</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugLumaLook" checked style="margin:0">luma look</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugLumaOrder" checked style="margin:0">luma order</label>
       </div>
     </div>
     <div class="note" id="lutStatus" style="margin-top:6px"></div>
@@ -594,7 +593,6 @@ const state = {
     debugStamps:   true,  // anchor restamps after every step
     debugBlur:     true,  // smoothness blur+restamp loop
     debugLumaLook: true,  // late-stage luma rotation
-    debugLumaOrder: true, // late-stage nearest-anchor L monotonicity clamp
     // LUT build method: 'idw' = GPU Shepard IDW bake; 'stripes' = CPU
     // hue-Voronoi stripes + global L/C clamps + smooth chroma envelope.
     lutMethod: 'idw',
@@ -1904,12 +1902,17 @@ function applyLumaLookPass(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  // Late-stage luma-ordering clamp: each cell's output L is bounded by
-  // the nearest anchor's L on the side matching the cell's input L.
-  // Keeps walking the cube monotonic — no cells brighter than the
-  // nearest anchor toward the dark border, no cells darker than the
-  // nearest anchor toward the bright border. Toggleable via debugLumaOrder.
-  if (state.params.debugLumaOrder !== false){
+  // Late-stage luma-ordering clamp — part of the ENVELOPE stage.
+  // Bounds each cell's output L by the nearest anchor's L on the side
+  // that matches the cell's input L, so walking the cube stays
+  // monotonic in L. Three stages can break monotonicity:
+  //   1. IDW Pass-2 weighted blend (when uLRange < 1, the dark/bright
+  //      mix of anchor Ls leaks into the output L).
+  //   2. FS_LUT_BLUR (smoothness blur averages L across cells, so an
+  //      anchor's L bleeds into its darker/brighter neighbours).
+  //   3. stripes_blur3D — the CPU equivalent inside Stripes' iter loop.
+  // Reach and luma-look only touch lab.yz, so they don't disorder L.
+  if (state.params.debugEnvelope){
     applyLumaOrderPass(state.lutTex, state.lutTex2);
     const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t;
   }
@@ -4322,7 +4325,6 @@ function init(){
   bindEnvToggle('debugStamps',   'debugStamps');
   bindEnvToggle('debugBlur',     'debugBlur');
   bindEnvToggle('debugLumaLook', 'debugLumaLook');
-  bindEnvToggle('debugLumaOrder', 'debugLumaOrder');
 
   // LUT-slice L picker (diagnostic) — re-renders the slice preview only.
   (function bindLutSliceL(){
@@ -4434,7 +4436,7 @@ function init(){
     // Post-stages
     'smoothness', 'lumaLook', 'lutStrength',
     // Debug toggles
-    'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook', 'debugLumaOrder',
+    'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
   ];
   function serializeLutPreset(){
     const out = {};
@@ -4470,7 +4472,7 @@ function init(){
     // Refresh toggles (envelope + debug stages)
     const toggleIds = [
       'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
-      'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook', 'debugLumaOrder',
+      'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
     ];
     for (const id of toggleIds){
       const el = document.getElementById(id);
