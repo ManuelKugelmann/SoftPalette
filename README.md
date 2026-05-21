@@ -4,6 +4,10 @@ using soft 3D Voronoi interpolation in OkLab space — gradients stay
 continuous, gaps fill cleanly, and the cube extends to its borders by
 construction.
 
+## Try it
+- **Live (GitHub Pages, main branch)**: <https://manuelkugelmann.github.io/SoftPalette/>
+- **Latest main commit (raw.githack)**: <https://raw.githack.com/ManuelKugelmann/SoftPalette/main/index.html>
+
 ## Usage
 - Drop an image.
 - Pick a palette (preset, extract-from-image, or hand-roll hex colors — up to 256 anchors).
