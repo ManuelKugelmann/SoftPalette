@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T10:14:02Z">
+<meta name="build" content="2026-05-21T10:16:34Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:14:02Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T10:16:34Z</span>
   </div>
 </header>
 
@@ -352,14 +352,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <input type="range" id="softness" min="1" max="12" step="0.1" value="9.0">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>luma range</span><span class="v" id="vLRange">1.00</span></div>
-        <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
-      </div>
-      <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>chroma range</span><span class="v" id="vCRange">0.50</span></div>
-        <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
-      </div>
-      <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>reach</span><span class="v" id="vReach">0.25</span></div>
         <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
       </div>
@@ -369,6 +361,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <div class="lbl"><span>stripe thickness</span><span class="v" id="vStripeRad">0.04</span></div>
         <input type="range" id="stripeRad" min="0.005" max="0.3" step="0.005" value="0.04">
       </div>
+    </div>
+
+    <!-- luma range / chroma range — shared between IDW and Stripes:
+         blend back from palette anchor L/C (0) toward image L/C (1). -->
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>luma range</span><span class="v" id="vLRange">1.00</span></div>
+      <input type="range" id="lRange" min="0" max="1" step="0.01" value="1.0">
+    </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>chroma range</span><span class="v" id="vCRange">0.50</span></div>
+      <input type="range" id="cRange" min="0" max="1" step="0.01" value="0.5">
     </div>
 
     <!-- Envelope clamp (shared) -->
@@ -1615,11 +1618,20 @@ function stripes_paletteEnvelope(seeds){
   }
   return {Lmin, Lmax, Cmin, Cmax};
 }
-function stripes_stampLut(L_cell, C_cell, seed_h, seedCMin, seedCMax, p){
-  const L_out = Math.max(p.lFloor, Math.min(p.lCeil, L_cell));
-  const cMax  = Math.min(p.cCeil, seedCMax);
-  const cMin  = Math.min(cMax, Math.max(p.cFloor, seedCMin));
-  const C_out = Math.max(cMin, Math.min(cMax, C_cell));
+function stripes_stampLut(L_cell, C_cell, seed_h, seed_L, seed_C, seedCMin, seedCMax, p, lRange, cRange){
+  // Clamp input L/C to the envelope, then blend back toward seed L/C per
+  // lRange / cRange. lRange = 1 (default) → output L = cell L (current
+  // Stripes behavior); lRange = 0 → output L = seed L (snap to palette).
+  // Same for cRange. Matches the IDW lRange / cRange semantics.
+  const L_clamped = Math.max(p.lFloor, Math.min(p.lCeil, L_cell));
+  const cMax      = Math.min(p.cCeil, seedCMax);
+  const cMin      = Math.min(cMax, Math.max(p.cFloor, seedCMin));
+  const C_clamped = Math.max(cMin, Math.min(cMax, C_cell));
+  const seed_C_c  = Math.max(cMin, Math.min(cMax, seed_C));
+  const lR = lRange != null ? lRange : 1;
+  const cR = cRange != null ? cRange : 1;
+  const L_out = seed_L   + lR * (L_clamped - seed_L);
+  const C_out = seed_C_c + cR * (C_clamped - seed_C_c);
   return [L_out, C_out * Math.cos(seed_h), C_out * Math.sin(seed_h)];
 }
 // Separable 3D blur: 5-tap Gaussian (1,4,6,4,1)/16 on a, b axes;
@@ -1730,7 +1742,7 @@ function stripes_buildLut(N){
           const d = stripes_hueDist(h_cell, seeds[k].h);
           if (d < bestD){ bestD = d; best = seeds[k]; }
         }
-        const out = stripes_stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
+        const out = stripes_stampLut(L_cell, C_cell, best.h, best.L, best.C, floorAt(best.h), capAt(best.h), stamp_p, p.lRange, p.cRange);
         const idx = ((li*N + bi)*N + ai)*3;
         data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
       }
@@ -1754,7 +1766,7 @@ function stripes_buildLut(N){
             if (d < bestD){ bestD = d; best = s; }
           }
           if (best){
-            const out = stripes_stampLut(L_cell, C_cell, best.h, floorAt(best.h), capAt(best.h), stamp_p);
+            const out = stripes_stampLut(L_cell, C_cell, best.h, best.L, best.C, floorAt(best.h), capAt(best.h), stamp_p, p.lRange, p.cRange);
             const idx = ((li*N + bi)*N + ai)*3;
             data[idx] = out[0]; data[idx+1] = out[1]; data[idx+2] = out[2];
           }
