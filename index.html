@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:23:42Z">
+<meta name="build" content="2026-05-21T09:31:20Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -223,7 +223,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:23:42Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:31:20Z</span>
   </div>
 </header>
 
@@ -234,7 +234,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>presets</h2>
     <div class="row tight">
-      <button data-preset="tealgreen-amberorange" title="Cool teals/greens at low L, warm ambers/oranges at high L">tealgreen·amberorange</button>
+      <button data-preset="cold-warm" title="Cool teals/greens at low L, warm ambers/oranges at high L">cold / warm</button>
       <button data-preset="moebius">moebius</button>
       <button data-preset="ghibli">ghibli</button>
       <button data-preset="noir">noir·neon</button>
@@ -463,7 +463,7 @@ const PRESETS = {
   // (#1f4a3a) sits with the cool cluster; the amber (#d4a040) sits with the
   // warm cluster. The original green-teal #3ab088 has been darkened to
   // #2a8068 so it doesn't dominate the bright half.
-  'tealgreen-amberorange': ['#0a3a48','#1f4a3a','#1d5a66','#205a48','#fae060','#d5832f','#c44a2e'],
+  'cold-warm': ['#0a3a48','#1f4a3a','#1d5a66','#205a48','#fae060','#d5832f','#c44a2e'],
   'moebius':     ['#e6c8a0','#7ca6c8','#3a4a78','#c46a4a','#5a8a5a'],
   'ghibli':      ['#a8c8e0','#5e8a5e','#e8d8a0','#c46a4a','#2c4a5a'],
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
@@ -526,7 +526,7 @@ const PRESETS = {
 };
 
 const state = {
-  palette: PRESETS['tealgreen-amberorange'].map(h => ({hex: h, strength: 1.0})),
+  palette: PRESETS['cold-warm'].map(h => ({hex: h, strength: 1.0})),
   image: null, imageW: 0, imageH: 0, imageName: '',
   imageTex: null,
   // GPU LUT (3D textures ping-pong, RGBA16F, holds OkLab per cell)
@@ -613,7 +613,7 @@ const state = {
   // user drops a custom image or edits the palette so the UI reflects truth.
   // Initial values mirror the boot defaults (sunset image, teal-orange palette).
   selectedImageBtn: 'hueImage',
-  selectedPresetBtn: 'tealgreen-amberorange',
+  selectedPresetBtn: 'cold-warm',
 };
 
 const IMAGE_BTN_IDS = ['hueImage','resetImage','photoImage','landscapeImage','animeImage','portraitImage','natureImage','parrotsImage'];
