@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T15:41:19Z">
+<meta name="build" content="2026-05-21T15:43:44Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:41:19Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:43:44Z</span>
   </div>
 </header>
 
@@ -1888,6 +1888,8 @@ function scheduleLumaLookRefresh(){
   requestAnimationFrame(() => {
     state.rafPendingLook = false;
     applyLumaLookPass();
+    state.lutValidation = validateAnchorNeighbours();
+    updateLutStatus();
     renderHuePreview();
     requestRender();
   });
@@ -1951,6 +1953,11 @@ function applyLateStages(seeds, N){
   state.lutTex    = state.lutTexRaw;
   state.lutTexRaw = tmpLut;
   applyLumaLookPass();
+
+  // Validation: how close are anchor neighbours to the anchor's true Lab?
+  // Reads the just-finalized state.lutTex; result is rendered by
+  // updateLutStatus() into the LUT status line.
+  state.lutValidation = validateAnchorNeighbours();
 
   // Restore default framebuffer / viewport.
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -2056,7 +2063,84 @@ function updateLutStatus(){
   const el = document.getElementById('lutStatus');
   if (!el) return;
   if (state.palette.length === 0 || state.lutN === 0){ el.textContent = ''; return; }
-  el.textContent = `LUT ${state.lutN}³ · built in ${state.lutBuildMs.toFixed(1)}ms`;
+  let line = `LUT ${state.lutN}³ · built in ${state.lutBuildMs.toFixed(1)}ms`;
+  const v = state.lutValidation;
+  if (v && v.count > 0){
+    line += ` · anchor neighbours ΔE avg ${v.avgDE.toFixed(3)} max ${v.maxDE.toFixed(3)}`;
+  }
+  el.textContent = line;
+}
+
+// Validation: read the final LUT back and check that each real anchor's
+// 6 face-neighbours in the cube are perceptually close to the anchor
+// (Euclidean distance in OkLab). After stamping, the anchor cell itself
+// is exact — divergence at its neighbours signals the surrounding pass
+// (IDW blend / stripe stamp / blur) produced something inconsistent
+// with the palette. Reports avg + max ΔE across all (anchor, neighbour)
+// pairs. Single round-trip per z-slice that any anchor touches.
+function validateAnchorNeighbours(){
+  const gl = state.gl;
+  if (!gl || !state.lutTex || !state.lutFbo) return null;
+  const N = state.lutN;
+  const seeds = paletteSeeds().filter(s => !s.synthetic);
+  if (seeds.length === 0 || N < 2) return null;
+
+  // Collect z-slices we need (anchor li ± 1).
+  const neededLi = new Set();
+  const anchors = [];
+  for (const s of seeds){
+    const li = Math.round(s.L * (N - 1));
+    const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+    const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
+    if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
+    anchors.push({ s, li, ai, bi });
+    if (li - 1 >= 0) neededLi.add(li - 1);
+    neededLi.add(li);
+    if (li + 1 < N) neededLi.add(li + 1);
+  }
+  if (anchors.length === 0) return null;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
+  const slices = new Map();
+  for (const li of neededLi){
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTex, 0, li);
+    const out = new Float32Array(N * N * 4);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.FLOAT, out);
+    slices.set(li, out);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  const offsets = [
+    [-1, 0, 0], [1, 0, 0],
+    [0, -1, 0], [0, 1, 0],
+    [0, 0, -1], [0, 0, 1],
+  ];
+  let maxDE = 0, sumDE = 0, count = 0, worst = -1;
+  for (let k = 0; k < anchors.length; k++){
+    const { s, li, ai, bi } = anchors[k];
+    let aMax = 0;
+    for (const [dl, da, db] of offsets){
+      const nli = li + dl, nai = ai + da, nbi = bi + db;
+      if (nli < 0 || nli >= N || nai < 0 || nai >= N || nbi < 0 || nbi >= N) continue;
+      const slice = slices.get(nli);
+      if (!slice) continue;
+      const i = (nbi * N + nai) * 4;
+      const dL = slice[i]   - s.L;
+      const dA = slice[i+1] - s.a;
+      const dB = slice[i+2] - s.b;
+      const dE = Math.sqrt(dL*dL + dA*dA + dB*dB);
+      if (dE > aMax) aMax = dE;
+      sumDE += dE;
+      count++;
+    }
+    if (aMax > maxDE){ maxDE = aMax; worst = k; }
+  }
+  return {
+    avgDE: count > 0 ? sumDE / count : 0,
+    maxDE,
+    count,
+    worstAnchorIndex: worst,
+  };
 }
 
 /* =========================================================

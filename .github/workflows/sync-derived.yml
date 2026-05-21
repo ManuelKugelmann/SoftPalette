@@ -1,0 +1,51 @@
+name: Sync derived files
+
+# Server-side equivalent of the .githooks/pre-commit hook. After every
+# push, runs both sync scripts in the same job (one checkout, one
+# commit if anything moved):
+#   - scripts/sync-readme-branch.sh  → README githack link
+#   - scripts/sync-build-timestamp.sh → index.html build badge
+# Skip itself by tagging its own commits with [skip sync-derived].
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: ${{ !contains(github.event.head_commit.message, '[skip sync-derived]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+      - name: Sync README githack link
+        run: bash scripts/sync-readme-branch.sh
+      - name: Sync build timestamp
+        run: bash scripts/sync-build-timestamp.sh
+      - name: Commit + push if anything changed
+        run: |
+          if git diff --quiet -- README.md index.html; then
+            echo "No derived files moved — nothing to push."
+            exit 0
+          fi
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          msg=()
+          if ! git diff --quiet -- README.md; then
+            git add README.md
+            msg+=("README githack link → ${{ github.ref_name }}")
+          fi
+          if ! git diff --quiet -- index.html; then
+            git add index.html
+            msg+=("build timestamp")
+          fi
+          # Join with " + " into the commit subject.
+          subj="sync: $(IFS=' + '; echo "${msg[*]}") [skip sync-derived]"
+          git commit -m "$subj"
+          git push origin HEAD:${{ github.ref_name }}
