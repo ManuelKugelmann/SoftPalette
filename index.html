@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T15:57:16Z">
+<meta name="build" content="2026-05-21T16:01:17Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:57:16Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T16:01:17Z</span>
   </div>
 </header>
 
@@ -1938,8 +1938,18 @@ function scheduleLumaLookRefresh(){
 }
 
 // Shared post-build pipeline: anchor stamp → smoothness blur+restamp loop
-// → reach desaturation → luma-look rotation. Both IDW and Stripes run this
-// after their respective step-1 bakes write into state.lutTex.
+// → reach desaturation → luma-look rotation → luma-order clamp. Both IDW
+// and Stripes run this after their respective step-1 bakes write into
+// state.lutTex.
+//
+// Reordering safety of the per-cell late stages:
+//   reach    operates on |yz|         (scalar magnitude scaling)
+//   lumaLook operates on arg(yz)      (pure rotation, magnitude preserved)
+//   lumaOrder operates on lab.x       (directional clamp around nearest L)
+// Each touches a disjoint axis of the cell, so any order of those three
+// produces the same result. The build/blur/stamp ordering is fixed
+// (blur reads neighbours, stamps overwrite cells), so this comment is
+// specifically about the post-blur per-cell passes.
 function applyLateStages(seeds, N){
   const gl = state.gl;
 
@@ -2549,13 +2559,26 @@ void main(){
     float dL = max(env.r - L_in, L_in - env.g);
     float dC = max(env.b - C_in, C_in - env.a);
     float outside = max(0.0, max(dL, dC));
-    // Smooth ramp from 0 (just outside) to 1 (well outside), so the
-    // luma-look fades in past the envelope edge rather than snapping on.
     float outsideAmt = smoothstep(0.0, 0.08, outside);
     if (outsideAmt > 0.0){
       vec2 expected   = texture(uLumaCurve, vec2(clamp(L_in, 0.0, 1.0), 0.5)).rg;
       float midWeight = 0.2 + 0.8 * abs(L_in - 0.5) * 2.0;
-      lab.yz = mix(lab.yz, expected, uLumaLook * midWeight * outsideAmt);
+      float w  = uLumaLook * midWeight * outsideAmt;
+      // PURE rotation toward the expected hue — preserves |yz| so this
+      // stage commutes with FS_LUT_REACH (scalar magnitude scaling).
+      // The linear-mix version used to also change magnitude, which
+      // made reach-then-lumalook ≠ lumalook-then-reach.
+      float curC = length(lab.yz);
+      float expC = length(expected);
+      if (curC > 1e-6 && expC > 1e-6){
+        float curH = atan(lab.yz.y, lab.yz.x);
+        float expH = atan(expected.y, expected.x);
+        float dh   = expH - curH;
+        if (dh >  PI) dh -= 2.0 * PI;
+        if (dh < -PI) dh += 2.0 * PI;
+        float newH = curH + w * dh;
+        lab.yz = vec2(curC * cos(newH), curC * sin(newH));
+      }
     }
   }
   fragColor = vec4(lab, 1.0);
@@ -3521,7 +3544,14 @@ function rawStripesLab(L, a, b, seeds){
     if (d < bestD){ bestD = d; bestH = sh; }
   }
   if (bestH === null) return [L, a, b];
-  return [L, Cs * Math.cos(bestH), Cs * Math.sin(bestH)];
+  // Border cleanness: as input chroma → 0 (top white / bottom black of
+  // the picker), fade the rotation toward the original sample so near-
+  // grey rows stay near-grey instead of getting pulled to a coloured
+  // anchor's hue.
+  const t  = Math.min(1, Cs / 0.04);
+  const Ao = Cs * Math.cos(bestH);
+  const Bo = Cs * Math.sin(bestH);
+  return [L, t * Ao + (1 - t) * a, t * Bo + (1 - t) * b];
 }
 
 // Raw-IDW preview pass — Shepard IDW + soft hue gate + chroma-preserve only.
@@ -3563,7 +3593,13 @@ function rawIdwLab(L, a, b, seeds, sigmaL, sigmaAB, softness){
     Ao *= target / mag;
     Bo *= target / mag;
   }
-  return [Lo, Ao, Bo];
+  // Border cleanness: near-grey input (low cell chroma) keeps the input
+  // L and chroma direction, so the top and bottom rows of the picker
+  // (near white / black) stay grey instead of being mapped onto a
+  // coloured anchor's Lab.
+  const cellC = Math.sqrt(cellC2);
+  const t = Math.min(1, cellC / 0.04);
+  return [t * Lo + (1 - t) * L, t * Ao + (1 - t) * a, t * Bo + (1 - t) * b];
 }
 
 // One-time GPU resources for the GPU-rendered hues preview: the hue picker
