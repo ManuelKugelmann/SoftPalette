@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T16:02:04Z">
+<meta name="build" content="2026-05-21T16:07:21Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T16:02:04Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T16:07:21Z</span>
   </div>
 </header>
 
@@ -1811,23 +1811,23 @@ function stripes_uploadLut(data, N){
 // Late-stage reach pass — reads from one 3D texture, writes the
 // desaturated result to another. Ping-pongs lutTex / lutTex2 like the
 // blur. Skipped on the empty-palette path.
-function applyLumaOrderPass(srcTex, dstTex){
+// Reusable L-write — overwrites the L channel of every LUT cell with
+// its cube-axis position (`uZ/(N-1)`), preserving lab.yz. Works
+// outwards from anchors in the sense that anchor cells (stamped back
+// to their exact Lab afterwards) anchor the L slices, and every other
+// slice's L is the cube-step offset from the nearest anchor's slice.
+function applyLWritePass(srcTex, dstTex){
   if (!srcTex || !dstTex) return;
   const gl = state.gl;
   const N  = state.lutN;
-  const prog = state.programs.lutLumaOrder;
+  const prog = state.programs.lutLWrite;
   if (!prog) return;
   gl.useProgram(prog);
   gl.bindVertexArray(state.vao);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, state.seedTex);
-  gl.uniform1i(gl.getUniformLocation(prog, 'uSeeds'), 0);
-  gl.uniform1i(gl.getUniformLocation(prog, 'uPalN'),  Math.min(state.palette.length, MAX_PAL));
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, srcTex);
   gl.uniform1i(gl.getUniformLocation(prog, 'uLutIn'), 1);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uN'),       N);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uN'),     N);
   const uZ = gl.getUniformLocation(prog, 'uZ');
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
@@ -1902,18 +1902,21 @@ function applyLumaLookPass(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  // Late-stage luma-ordering clamp — part of the ENVELOPE stage.
-  // Bounds each cell's output L by the nearest anchor's L on the side
-  // that matches the cell's input L, so walking the cube stays
-  // monotonic in L. Three stages can break monotonicity:
-  //   1. IDW Pass-2 weighted blend (when uLRange < 1, the dark/bright
-  //      mix of anchor Ls leaks into the output L).
-  //   2. FS_LUT_BLUR (smoothness blur averages L across cells, so an
-  //      anchor's L bleeds into its darker/brighter neighbours).
-  //   3. stripes_blur3D — the CPU equivalent inside Stripes' iter loop.
+  // Late-stage reusable L-write — part of the ENVELOPE stage.
+  // Each cell's L is overwritten with its cube-axis position (L_in =
+  // uZ/(N-1)). Anchor cells get restamped to their exact Lab right
+  // after, so the L field grows monotonically OUTWARDS from each
+  // anchor in the L direction (one cube step per slice). Replaces the
+  // earlier directional clamp — instead of fixing disordered L after
+  // the fact, we write a clean monotonic L field by construction.
+  // Three stages can disorder L (now harmless, since this pass
+  // overwrites their output L):
+  //   1. IDW Pass-2 weighted blend at uLRange < 1.
+  //   2. FS_LUT_BLUR (smoothness blur averages L across cells).
+  //   3. stripes_blur3D — CPU equivalent inside Stripes' iter loop.
   // Reach and luma-look only touch lab.yz, so they don't disorder L.
   if (state.params.debugEnvelope){
-    applyLumaOrderPass(state.lutTex, state.lutTex2);
+    applyLWritePass(state.lutTex, state.lutTex2);
     const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t;
   }
   // Re-pin palette anchor cells to exact seed Lab — the rotation and the
@@ -2590,44 +2593,30 @@ void main(){
 // attenuated toward grey. Replaces the per-cell rejection that used to live
 // inside FS_LUT_BUILD — pulling it out makes the same falloff usable by
 // Stripes (and any future build method) without duplicating the logic.
-// Late-stage luma-order pass: for each cell, find the nearest palette
-// anchor (isotropic Lab distance), then directionally clamp the cell's
-// output L by the anchor's L — cells whose INPUT L sits below the
-// nearest anchor's L cannot output a brighter L than the anchor, and
-// cells whose input L sits above the anchor's L cannot output a darker
-// L. Preserves monotonic luma ordering: walking the cube from any
-// anchor toward the dark border never produces brighter outputs than
-// the anchor; walking toward the bright border never produces darker.
-const FS_LUT_LUMA_ORDER = `#version 300 es
+// Reusable L-write pass — works OUTWARDS from anchors.
+//   lab.x = L_in   (the cell's cube-axis position)
+// Every cell's L equals its own cube position; anchor cells (where the
+// cube L slice coincides with an anchor's L) are restamped exactly
+// after, so the L field grows monotonically away from each anchor in
+// the L direction (one cube step per slice). a/b directions don't
+// change L. Net effect: walking the cube from any anchor produces a
+// strictly monotonic L sequence — guaranteed by construction, not
+// post-hoc clamping. Reusable: any builder that needs a clean
+// anchor-rooted L field can invoke it.
+const FS_LUT_L_WRITE = `#version 300 es
 precision highp float;
 precision highp sampler3D;
 out vec4 fragColor;
 uniform sampler3D uLutIn;
-uniform sampler2D uSeeds;
-uniform int   uPalN;
 uniform float uN;
 uniform float uZ;
-uniform float uAbRange;
 void main(){
   float N    = uN;
   float ai   = floor(gl_FragCoord.x);
   float bi   = floor(gl_FragCoord.y);
-  float L_in = uZ / max(N - 1.0, 1.0);
-  float a_in = -uAbRange + (ai / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
-  float b_in = -uAbRange + (bi / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
   vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
   vec3  lab  = texture(uLutIn, uvw).rgb;
-  float dmin2 = 1e30;
-  float bestAnchorL = lab.x;
-  for (int i = 0; i < ${MAX_PAL}; i++){
-    if (i >= uPalN) break;
-    vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
-    float dL = L_in - s.x, dA = a_in - s.y, dB = b_in - s.z;
-    float d2 = dL * dL + dA * dA + dB * dB;
-    if (d2 < dmin2){ dmin2 = d2; bestAnchorL = s.x; }
-  }
-  if (L_in < bestAnchorL)      lab.x = min(lab.x, bestAnchorL);
-  else if (L_in > bestAnchorL) lab.x = max(lab.x, bestAnchorL);
+  lab.x = uZ / max(N - 1.0, 1.0);
   fragColor = vec4(lab, 1.0);
 }`;
 
@@ -2729,7 +2718,7 @@ function initGL(){
   state.programs.lutSlice    = program(VS, FS_LUT_SLICE);
   state.programs.lutLumalook = program(VS, FS_LUT_LUMALOOK);
   state.programs.lutReach    = program(VS, FS_LUT_REACH);
-  state.programs.lutLumaOrder = program(VS, FS_LUT_LUMA_ORDER);
+  state.programs.lutLWrite   = program(VS, FS_LUT_L_WRITE);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
