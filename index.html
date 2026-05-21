@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T11:07:45Z">
+<meta name="build" content="2026-05-21T11:09:25Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T11:07:45Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T11:09:25Z</span>
   </div>
 </header>
 
@@ -445,7 +445,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div class="note" style="margin:6px 0 3px">LUT slice <span style="color:var(--txdd)">(a→, b↑) at L=<span id="vLutSliceL">0.50</span></span></div>
     <input type="range" id="lutSliceL" min="0" max="1" step="0.02" value="0.5" style="width:100%;margin-bottom:4px">
     <canvas id="lutSlicePreview" width="160" height="160" style="width:100%;max-width:160px;height:auto;display:block;image-rendering:pixelated;border:1px solid var(--bd)"></canvas>
-    <div class="note" style="margin:6px 0 3px">hues · raw IDW</div>
+    <div class="note" style="margin:6px 0 3px">hues · raw</div>
     <canvas id="idwPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd)"></canvas>
   </section>
 
@@ -3317,6 +3317,29 @@ function _writeLabToRGBA(dst, o, L, a, b){
   dst[o+3] = 255;
 }
 
+// Raw-Stripes preview: nearest-seed-by-hue Voronoi assignment (Stripes' step
+// 1 before any iter / blur / envelope clamp). Every cell stamps to the
+// closest seed's (L, C) at the seed's hue direction.
+function rawStripesLab(L, a, b, seeds){
+  if (seeds.length === 0) return [L, a, b];
+  const TWO_PI = 2 * Math.PI;
+  const PI = Math.PI;
+  const h_cell = Math.atan2(b, a);
+  let bestD = Infinity, best = null;
+  for (const s of seeds){
+    const seedC = Math.hypot(s.a, s.b);
+    if (seedC < 0.005) continue;
+    const seedH = Math.atan2(s.b, s.a);
+    let d = Math.abs(h_cell - seedH);
+    if (d > PI) d = TWO_PI - d;
+    if (d < bestD){ bestD = d; best = s; }
+  }
+  if (!best) return [L, a, b];
+  const seedH = Math.atan2(best.b, best.a);
+  const seedC = Math.hypot(best.a, best.b);
+  return [best.L, seedC * Math.cos(seedH), seedC * Math.sin(seedH)];
+}
+
 // Raw-IDW preview pass — Shepard IDW + soft hue gate + chroma-preserve only.
 // Skips luma look, rejection envelope, and cRange/lRange. Lets users see the
 // "bare" palette mapping versus the full pipeline.
@@ -3531,12 +3554,18 @@ function renderIdwPreview(){
   const dst = img.data;
   const seeds = paletteSeeds();
   if (seeds.length === 0){ dst.set(_huePreviewSrc); ctx.putImageData(img, 0, 0); return; }
-  const { lTol, abTol, softness } = state.params;
+  const { lTol, abTol, softness, lutMethod } = state.params;
   const src = _huePreviewSrc;
+  // Show step-1 raw output of the currently selected method:
+  //   IDW     → Shepard IDW (rawIdwLab)
+  //   Stripes → nearest-seed-by-hue snap (rawStripesLab)
+  const useStripes = lutMethod === 'stripes';
   for (let i = 0; i < W * H; i++){
     const o = i * 4;
     const lab = rgbToOklab(src[o]/255, src[o+1]/255, src[o+2]/255);
-    const [oL, oa, ob] = rawIdwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness);
+    const [oL, oa, ob] = useStripes
+      ? rawStripesLab(lab[0], lab[1], lab[2], seeds)
+      : rawIdwLab(lab[0], lab[1], lab[2], seeds, lTol, abTol, softness);
     _writeLabToRGBA(dst, o, oL, oa, ob);
   }
   ctx.putImageData(img, 0, 0);
