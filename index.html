@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T14:06:29Z">
+<meta name="build" content="2026-05-21T15:35:38Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T14:06:29Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:35:38Z</span>
   </div>
 </header>
 
@@ -2250,34 +2250,40 @@ void main(){
   // Reach desaturation moved to a LATE-STAGE shared pass (FS_LUT_REACH) so
   // both IDW and Stripes runs through the same anchor-distance falloff.
   lab.x = mix(lab.x, L, uLRange);
-  // Per-channel envelope clamp around the nearest anchor's L / C. At max
-  // slider (uLExt=1, uCExt=LUT_AB_RANGE) the range covers the whole axis and
-  // the clamp is a noop. At 0 the output is hard-snapped to the nearest
-  // anchor's L or C (chroma magnitude collapsed; hue direction kept).
   // Per-channel envelope clamp anchored to a hue-interpolated (L, C) band:
   // bounds come from Gaussian-weighted mean ± √3·std of palette anchors at
   // this hue, so the envelope width tracks the local anchor spread (tight
-  // where the palette is clustered, wide where it spreads). Plus ± slider
-  // extent slack. k=0.02 smoothing band on top.
+  // where the palette is clustered, wide where it spreads).
   const float PI = 3.14159265359;
   float hueT = atan(b, a) / (2.0 * PI) + 0.5;
   vec4 envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
   float envLLo = envHue.r, envLHi = envHue.g;
   float envCLo = envHue.b, envCHi = envHue.a;
-  // Hard clamp: inside [envLLo − uLExt, envLHi + uLExt] passes through
-  // unchanged; outside snaps to the nearest boundary. The hue-curve already
-  // varies smoothly so the bounds don't jump per hue → no soft-clamp band
-  // needed (it was causing a small darkening near the upper edge and
-  // lifting near the lower edge even for in-band inputs).
-  // Floor/ceil toggles disable one side by pushing its bound to ±∞.
-  float lLo = uLEnvFloor > 0.5 ? (envLLo - uLExt) : -1e6;
-  float lHi = uLEnvCeil  > 0.5 ? (envLHi + uLExt) :  1e6;
-  lab.x = clamp(lab.x, lLo, lHi);
+  // Smooth one-sided clamp: INSIDE [envLLo, envLHi] is strictly passthrough
+  // (no darkening, no lifting). OUTSIDE, uLExt is the soft margin — over
+  // that distance the value smoothly approaches the envelope boundary,
+  // reaching it at uLExt past the edge. smoothstep(0,1,t) is C1-continuous
+  // at t=0 so there's no kink at the envelope boundary.
+  float lSoft = max(uLExt, 1e-4);
+  if (uLEnvCeil > 0.5 && lab.x > envLHi){
+    float t = clamp((lab.x - envLHi) / lSoft, 0.0, 1.0);
+    lab.x = mix(lab.x, envLHi, smoothstep(0.0, 1.0, t));
+  }
+  if (uLEnvFloor > 0.5 && lab.x < envLLo){
+    float t = clamp((envLLo - lab.x) / lSoft, 0.0, 1.0);
+    lab.x = mix(lab.x, envLLo, smoothstep(0.0, 1.0, t));
+  }
   float outC = length(lab.yz);
-  float minC = uCEnvFloor > 0.5 ? max(0.0, envCLo - uCExt) : 0.0;
-  float maxC = uCEnvCeil  > 0.5 ? (envCHi + uCExt)         : 1e6;
-  float clampedC = clamp(outC, minC, maxC);
-  if (outC > 1e-6) lab.yz *= clampedC / outC;
+  float cSoft = max(uCExt, 1e-4);
+  float newC = outC;
+  if (uCEnvCeil > 0.5 && outC > envCHi){
+    float t = clamp((outC - envCHi) / cSoft, 0.0, 1.0);
+    newC = mix(outC, envCHi, smoothstep(0.0, 1.0, t));
+  } else if (uCEnvFloor > 0.5 && outC < envCLo){
+    float t = clamp((envCLo - outC) / cSoft, 0.0, 1.0);
+    newC = mix(outC, envCLo, smoothstep(0.0, 1.0, t));
+  }
+  if (outC > 1e-6) lab.yz *= newC / outC;
   fragColor = vec4(lab, 1.0);
 }`;
 
