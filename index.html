@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:35:21Z">
+<meta name="build" content="2026-05-21T09:37:54Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:35:21Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:37:54Z</span>
   </div>
 </header>
 
@@ -618,6 +618,9 @@ const state = {
   // Initial values mirror the boot defaults (sunset image, teal-orange palette).
   selectedImageBtn: 'hueImage',
   selectedPresetBtn: 'cold-warm',
+  // Active LUT preset name (wash / soft / …) or null. Set by applyLutPreset,
+  // cleared by any manual slider / toggle / method change.
+  activePreset: null,
 };
 
 const IMAGE_BTN_IDS = ['hueImage','resetImage','photoImage','landscapeImage','animeImage','portraitImage','natureImage','parrotsImage'];
@@ -3929,6 +3932,7 @@ function init(){
     inp.addEventListener('input', () => {
       state.params[key] = parseFloat(inp.value);
       lbl.textContent = fmt(state.params[key]);
+      clearActivePreset();
       scheduleLutRebuild();
     });
   }
@@ -3950,6 +3954,7 @@ function init(){
       const slider = parseFloat(inp.value);
       state.params.softness = 13 - slider;
       lbl.textContent = slider.toFixed(1);
+      clearActivePreset();
       scheduleLutRebuild();
     });
   })();
@@ -3964,6 +3969,7 @@ function init(){
     inp.addEventListener('input', () => {
       state.params.lumaLook = parseFloat(inp.value);
       lbl.textContent = state.params.lumaLook.toFixed(2);
+      clearActivePreset();
       scheduleLumaLookRefresh();
     });
   })();
@@ -3978,6 +3984,7 @@ function init(){
     el.checked = state.params[key];
     el.addEventListener('change', () => {
       state.params[key] = el.checked;
+      clearActivePreset();
       scheduleLutRebuild();
     });
   }
@@ -4049,11 +4056,27 @@ function init(){
     cEnvFloor: 'cEnvFloor',
     cEnvCeil:  'cEnvCeil',
   };
+  function refreshLutPresetBtns(){
+    const name = state.activePreset;
+    document.querySelectorAll('[data-lutpreset]').forEach(b => {
+      b.classList.toggle('selected', b.dataset.lutpreset === name);
+    });
+  }
+  function setActivePreset(name){
+    state.activePreset = name;
+    refreshLutPresetBtns();
+  }
+  function clearActivePreset(){
+    if (state.activePreset == null) return;
+    state.activePreset = null;
+    refreshLutPresetBtns();
+  }
   function applyLutPreset(name){
     const presets = lutPresetsByMethod[state.params.lutMethod] || lutPresetsByMethod.idw;
     const p = presets[name];
     if (!p) return;
     Object.assign(state.params, p);
+    setActivePreset(name);
     for (const [k, [inp, lbl, fmt]] of Object.entries(sliderMap)){
       if (state.params[k] === undefined) continue;
       const inpEl = document.getElementById(inp), lblEl = document.getElementById(lbl);
@@ -4175,7 +4198,7 @@ function init(){
     if (!txt) return;
     try {
       const obj = JSON.parse(txt);
-      if (applyLutPresetObject(obj)) flashBtn(loadBtn, 'loaded ✓', true);
+      if (applyLutPresetObject(obj)) { clearActivePreset(); flashBtn(loadBtn, 'loaded ✓', true); }
       else flashBtn(loadBtn, 'no params', false);
     } catch (e) {
       flashBtn(loadBtn, 'bad JSON', false);
@@ -4183,7 +4206,7 @@ function init(){
   });
   function refreshLutMethodBtns(){
     document.querySelectorAll('[data-lutmethod]').forEach(b => {
-      b.classList.toggle('active', b.dataset.lutmethod === state.params.lutMethod);
+      b.classList.toggle('selected', b.dataset.lutmethod === state.params.lutMethod);
     });
     const idwUI     = document.getElementById('idwControls');
     const stripesUI = document.getElementById('stripesControls');
@@ -4195,6 +4218,7 @@ function init(){
     btn.addEventListener('click', () => {
       state.params.lutMethod = btn.dataset.lutmethod;
       refreshLutMethodBtns();
+      clearActivePreset();
       scheduleLutRebuild();
     });
   });
