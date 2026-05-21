@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T15:38:09Z">
+<meta name="build" content="2026-05-21T15:41:06Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:38:09Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T15:41:06Z</span>
   </div>
 </header>
 
@@ -2259,29 +2259,37 @@ void main(){
   vec4 envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
   float envLLo = envHue.r, envLHi = envHue.g;
   float envCLo = envHue.b, envCHi = envHue.a;
-  // Smooth one-sided clamp: INSIDE [envLLo, envLHi] is strictly passthrough
-  // (no darkening, no lifting). OUTSIDE, uLExt is the soft margin — over
-  // that distance the value smoothly approaches the envelope boundary,
-  // reaching it at uLExt past the edge. smoothstep(0,1,t) is C1-continuous
-  // at t=0 so there's no kink at the envelope boundary.
-  float lSoft = max(uLExt, 1e-4);
-  if (uLEnvCeil > 0.5 && lab.x > envLHi){
-    float t = clamp((lab.x - envLHi) / lSoft, 0.0, 1.0);
-    lab.x = mix(lab.x, envLHi, smoothstep(0.0, 1.0, t));
+  // Envelope band semantics: uLExt / uCExt EXTEND the natural envelope
+  // bounds outward on each side. Cells whose value lies inside the
+  // extended band [envLLo - uLExt, envLHi + uLExt] are strict passthrough
+  // (no darkening, no lifting). Beyond the band edge, the value is
+  // asymptotically pulled back toward the boundary via
+  //   output = boundary ± softW * (1 - exp(-over / softW))
+  // so excess past the edge compresses smoothly into a softW-wide skirt
+  // (output never exceeds boundary + softW). At max slider (uLExt = 1)
+  // the band already covers [0,1] so no cell is "outside" → noop.
+  const float L_SKIRT = 0.10;
+  const float C_SKIRT = 0.04;
+  float lHi = envLHi + uLExt;
+  float lLo = envLLo - uLExt;
+  if (uLEnvCeil > 0.5 && lab.x > lHi){
+    float over = lab.x - lHi;
+    lab.x = lHi + L_SKIRT * (1.0 - exp(-over / L_SKIRT));
   }
-  if (uLEnvFloor > 0.5 && lab.x < envLLo){
-    float t = clamp((envLLo - lab.x) / lSoft, 0.0, 1.0);
-    lab.x = mix(lab.x, envLLo, smoothstep(0.0, 1.0, t));
+  if (uLEnvFloor > 0.5 && lab.x < lLo){
+    float under = lLo - lab.x;
+    lab.x = lLo - L_SKIRT * (1.0 - exp(-under / L_SKIRT));
   }
   float outC = length(lab.yz);
-  float cSoft = max(uCExt, 1e-4);
+  float cHi = envCHi + uCExt;
+  float cLo = max(0.0, envCLo - uCExt);
   float newC = outC;
-  if (uCEnvCeil > 0.5 && outC > envCHi){
-    float t = clamp((outC - envCHi) / cSoft, 0.0, 1.0);
-    newC = mix(outC, envCHi, smoothstep(0.0, 1.0, t));
-  } else if (uCEnvFloor > 0.5 && outC < envCLo){
-    float t = clamp((envCLo - outC) / cSoft, 0.0, 1.0);
-    newC = mix(outC, envCLo, smoothstep(0.0, 1.0, t));
+  if (uCEnvCeil > 0.5 && outC > cHi){
+    float over = outC - cHi;
+    newC = cHi + C_SKIRT * (1.0 - exp(-over / C_SKIRT));
+  } else if (uCEnvFloor > 0.5 && outC < cLo){
+    float under = cLo - outC;
+    newC = max(0.0, cLo - C_SKIRT * (1.0 - exp(-under / C_SKIRT)));
   }
   if (outC > 1e-6) lab.yz *= newC / outC;
   fragColor = vec4(lab, 1.0);
