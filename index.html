@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T16:08:03Z">
+<meta name="build" content="2026-05-21T21:12:33Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -227,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T16:08:03Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T21:12:33Z</span>
   </div>
 </header>
 
@@ -423,6 +423,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="note" style="margin-bottom:6px;color:var(--txd)">Debug · stages</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:var(--txd)">
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugEnvelope" checked style="margin:0">envelope</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Paint cells the L envelope clamp actually touched black, so you can see the affected region at a glance."><input type="checkbox" id="debugEnvelopeViz" style="margin:0">env viz</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugStamps"   checked style="margin:0">anchor stamps</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugBlur"     checked style="margin:0">blur</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugLumaLook" checked style="margin:0">luma look</label>
@@ -590,6 +591,7 @@ const state = {
     lutStrength: 1.0,    // 0=identity passthrough, 1=full LUT
     // Per-stage debug toggles — flip off to isolate each step's effect.
     debugEnvelope: true,  // envelope clamp in build pass
+    debugEnvelopeViz: false, // late-stage L envelope: paint clamped cells black
     debugStamps:   true,  // anchor restamps after every step
     debugBlur:     true,  // smoothness blur+restamp loop
     debugLumaLook: true,  // late-stage luma rotation
@@ -1811,23 +1813,33 @@ function stripes_uploadLut(data, N){
 // Late-stage reach pass — reads from one 3D texture, writes the
 // desaturated result to another. Ping-pongs lutTex / lutTex2 like the
 // blur. Skipped on the empty-palette path.
-// Reusable L-write — overwrites the L channel of every LUT cell with
-// its cube-axis position (`uZ/(N-1)`), preserving lab.yz. Works
-// outwards from anchors in the sense that anchor cells (stamped back
-// to their exact Lab afterwards) anchor the L slices, and every other
-// slice's L is the cube-step offset from the nearest anchor's slice.
-function applyLWritePass(srcTex, dstTex){
+// Reusable L envelope clamp — only touches cells whose L lies OUTSIDE
+// the per-hue passthrough band [envLLo - uLExt, envLHi + uLExt]. Cells
+// inside the band pass through untouched. Floor / ceil sides are
+// independently toggleable. When debugEnvelopeViz is on, cells the
+// clamp actually moved are painted black instead.
+function applyLEnvelopePass(srcTex, dstTex){
   if (!srcTex || !dstTex) return;
   const gl = state.gl;
   const N  = state.lutN;
-  const prog = state.programs.lutLWrite;
+  const prog = state.programs.lutLEnvelope;
   if (!prog) return;
+  const p = state.params;
   gl.useProgram(prog);
   gl.bindVertexArray(state.vao);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, srcTex);
   gl.uniform1i(gl.getUniformLocation(prog, 'uLutIn'), 1);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uN'),     N);
+  if (state.hueLCTex){
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, state.hueLCTex);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uHueLCCurve'), 3);
+  }
+  gl.uniform1f(gl.getUniformLocation(prog, 'uN'),         N);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLExt'),      p.lExt);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLEnvFloor'), p.lEnvFloor ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLEnvCeil'),  p.lEnvCeil  ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uDebugViz'),  p.debugEnvelopeViz ? 1 : 0);
   const uZ = gl.getUniformLocation(prog, 'uZ');
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
@@ -1902,21 +1914,16 @@ function applyLumaLookPass(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  // Late-stage reusable L-write — part of the ENVELOPE stage.
-  // Each cell's L is overwritten with its cube-axis position (L_in =
-  // uZ/(N-1)). Anchor cells get restamped to their exact Lab right
-  // after, so the L field grows monotonically OUTWARDS from each
-  // anchor in the L direction (one cube step per slice). Replaces the
-  // earlier directional clamp — instead of fixing disordered L after
-  // the fact, we write a clean monotonic L field by construction.
-  // Three stages can disorder L (now harmless, since this pass
-  // overwrites their output L):
-  //   1. IDW Pass-2 weighted blend at uLRange < 1.
-  //   2. FS_LUT_BLUR (smoothness blur averages L across cells).
-  //   3. stripes_blur3D — CPU equivalent inside Stripes' iter loop.
-  // Reach and luma-look only touch lab.yz, so they don't disorder L.
+  // Late-stage L envelope clamp — ONLY touches cells whose L lies past
+  // the extended passthrough band [envLLo - uLExt, envLHi + uLExt].
+  // Cells below the ceil (resp. above the floor) are strict passthrough
+  // — no darkening, no lifting. Beyond the band, asymptotic skirt:
+  //   lab.x → boundary + L_SKIRT * (1 - exp(-over / L_SKIRT))
+  // Floor / ceil sides individually toggle-able. When
+  // debugEnvelopeViz is on, cells the clamp actually touched are
+  // painted black so the affected region is visible at a glance.
   if (state.params.debugEnvelope){
-    applyLWritePass(state.lutTex, state.lutTex2);
+    applyLEnvelopePass(state.lutTex, state.lutTex2);
     const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t;
   }
   // Re-pin palette anchor cells to exact seed Lab — the rotation and the
@@ -2121,7 +2128,10 @@ function updateLutStatus(){
   let line = `LUT ${state.lutN}³ · built in ${state.lutBuildMs.toFixed(1)}ms`;
   const v = state.lutValidation;
   if (v && v.count > 0){
-    line += ` · anchor neighbours ΔE avg ${v.avgDE.toFixed(3)} max ${v.maxDE.toFixed(3)}`;
+    line += ` · neighbours ΔE avg ${v.avgDE.toFixed(3)} max ${v.maxDE.toFixed(3)}`;
+    line += ` · anchor self ΔE max ${v.maxSelfDE.toFixed(3)}`;
+    if (v.missing > 0)   line += ` · ${v.missing}/${v.totalAnchors} off`;
+    if (v.collisions > 0) line += ` · ${v.collisions} cell collisions`;
   }
   el.textContent = line;
 }
@@ -2140,14 +2150,27 @@ function validateAnchorNeighbours(){
   const seeds = paletteSeeds().filter(s => !s.synthetic);
   if (seeds.length === 0 || N < 2) return null;
 
-  // Collect z-slices we need (anchor li ± 1).
+  // Collect z-slices we need (anchor li ± 1). Detect cell collisions:
+  // when two anchors round to the same (li, ai, bi), only the last
+  // stamp wins, so the first anchor ends up holding the wrong Lab —
+  // that's the "not all anchors are at their value" symptom.
   const neededLi = new Set();
   const anchors = [];
+  const cellMap = new Map();
+  let collisions = 0;
+  const collisionPairs = [];
   for (const s of seeds){
     const li = Math.round(s.L * (N - 1));
     const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
     const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
     if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
+    const key = li * N * N + bi * N + ai;
+    const prev = cellMap.get(key);
+    if (prev !== undefined){
+      collisions++;
+      if (collisionPairs.length < 4) collisionPairs.push([prev, anchors.length]);
+    }
+    cellMap.set(key, anchors.length);
     anchors.push({ s, li, ai, bi });
     if (li - 1 >= 0) neededLi.add(li - 1);
     neededLi.add(li);
@@ -2170,19 +2193,35 @@ function validateAnchorNeighbours(){
     [0, -1, 0], [0, 1, 0],
     [0, 0, -1], [0, 0, 1],
   ];
+  // Self-check: anchor cell should hold the anchor's exact Lab after
+  // the post-build stamps. ΔE > epsilon at any anchor's own cell
+  // means either a collision (another anchor overwrote it) or a stamp
+  // somewhere wasn't applied.
   let maxDE = 0, sumDE = 0, count = 0, worst = -1;
+  let maxSelfDE = 0, missing = 0;
+  const EPS = 1e-3;
   for (let k = 0; k < anchors.length; k++){
     const { s, li, ai, bi } = anchors[k];
+    const slice = slices.get(li);
+    if (slice){
+      const i = (bi * N + ai) * 4;
+      const dL = slice[i]   - s.L;
+      const dA = slice[i+1] - s.a;
+      const dB = slice[i+2] - s.b;
+      const dSelf = Math.sqrt(dL*dL + dA*dA + dB*dB);
+      if (dSelf > maxSelfDE) maxSelfDE = dSelf;
+      if (dSelf > EPS) missing++;
+    }
     let aMax = 0;
     for (const [dl, da, db] of offsets){
       const nli = li + dl, nai = ai + da, nbi = bi + db;
       if (nli < 0 || nli >= N || nai < 0 || nai >= N || nbi < 0 || nbi >= N) continue;
-      const slice = slices.get(nli);
-      if (!slice) continue;
+      const nSlice = slices.get(nli);
+      if (!nSlice) continue;
       const i = (nbi * N + nai) * 4;
-      const dL = slice[i]   - s.L;
-      const dA = slice[i+1] - s.a;
-      const dB = slice[i+2] - s.b;
+      const dL = nSlice[i]   - s.L;
+      const dA = nSlice[i+1] - s.a;
+      const dB = nSlice[i+2] - s.b;
       const dE = Math.sqrt(dL*dL + dA*dA + dB*dB);
       if (dE > aMax) aMax = dE;
       sumDE += dE;
@@ -2195,6 +2234,11 @@ function validateAnchorNeighbours(){
     maxDE,
     count,
     worstAnchorIndex: worst,
+    collisions,
+    collisionPairs,
+    missing,
+    maxSelfDE,
+    totalAnchors: anchors.length,
   };
 }
 
@@ -2593,30 +2637,63 @@ void main(){
 // attenuated toward grey. Replaces the per-cell rejection that used to live
 // inside FS_LUT_BUILD — pulling it out makes the same falloff usable by
 // Stripes (and any future build method) without duplicating the logic.
-// Reusable L-write pass — works OUTWARDS from anchors.
-//   lab.x = L_in   (the cell's cube-axis position)
-// Every cell's L equals its own cube position; anchor cells (where the
-// cube L slice coincides with an anchor's L) are restamped exactly
-// after, so the L field grows monotonically away from each anchor in
-// the L direction (one cube step per slice). a/b directions don't
-// change L. Net effect: walking the cube from any anchor produces a
-// strictly monotonic L sequence — guaranteed by construction, not
-// post-hoc clamping. Reusable: any builder that needs a clean
-// anchor-rooted L field can invoke it.
-const FS_LUT_L_WRITE = `#version 300 es
+// Reusable L envelope clamp — late-stage pass.
+//
+// Semantics (the previous L-write was wrong; it overwrote L for every
+// cell, including cells below the ceil, which is exactly what the user
+// hit):
+//   * Read the cell's current Lab.
+//   * Look up the per-hue envelope [envLLo, envLHi] at the OUTPUT hue.
+//   * Extended passthrough band = [envLLo - uLExt, envLHi + uLExt].
+//   * Cells STRICTLY INSIDE the band → untouched.
+//   * lab.x > envLHi + uLExt → smooth skirt toward the ceil:
+//        lab.x = ceil + L_SKIRT * (1 - exp(-over / L_SKIRT))
+//   * lab.x < envLLo - uLExt → mirror skirt toward the floor.
+//   * Floor / ceil sides individually disabled by uLEnvFloor / uLEnvCeil.
+//
+// Debug viz: when uDebugViz > 0.5, cells the clamp actually touched are
+// painted black (lab = 0) instead of being clamped — lets you see at a
+// glance which cells are affected without guessing from the LUT slice.
+const FS_LUT_L_ENVELOPE = `#version 300 es
 precision highp float;
 precision highp sampler3D;
 out vec4 fragColor;
 uniform sampler3D uLutIn;
+uniform sampler2D uHueLCCurve;
 uniform float uN;
 uniform float uZ;
+uniform float uLExt;
+uniform float uLEnvFloor;
+uniform float uLEnvCeil;
+uniform float uDebugViz;
 void main(){
   float N    = uN;
   float ai   = floor(gl_FragCoord.x);
   float bi   = floor(gl_FragCoord.y);
   vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
   vec3  lab  = texture(uLutIn, uvw).rgb;
-  lab.x = uZ / max(N - 1.0, 1.0);
+  const float PI = 3.14159265359;
+  // Output-hue lookup — envelope band is interpreted as "for the colour
+  // the cell currently is, what L values are palette-legitimate?".
+  float hueT  = atan(lab.z, lab.y) / (2.0 * PI) + 0.5;
+  vec4  env   = texture(uHueLCCurve, vec2(hueT, 0.5));
+  float envLLo = env.r, envLHi = env.g;
+  const float L_SKIRT = 0.10;
+  float lHi = envLHi + uLExt;
+  float lLo = envLLo - uLExt;
+  bool affected = false;
+  if (uLEnvCeil > 0.5 && lab.x > lHi){
+    float over = lab.x - lHi;
+    lab.x = lHi + L_SKIRT * (1.0 - exp(-over / L_SKIRT));
+    affected = true;
+  } else if (uLEnvFloor > 0.5 && lab.x < lLo){
+    float under = lLo - lab.x;
+    lab.x = lLo - L_SKIRT * (1.0 - exp(-under / L_SKIRT));
+    affected = true;
+  }
+  if (uDebugViz > 0.5 && affected){
+    lab = vec3(0.0);
+  }
   fragColor = vec4(lab, 1.0);
 }`;
 
@@ -2718,7 +2795,7 @@ function initGL(){
   state.programs.lutSlice    = program(VS, FS_LUT_SLICE);
   state.programs.lutLumalook = program(VS, FS_LUT_LUMALOOK);
   state.programs.lutReach    = program(VS, FS_LUT_REACH);
-  state.programs.lutLWrite   = program(VS, FS_LUT_L_WRITE);
+  state.programs.lutLEnvelope = program(VS, FS_LUT_L_ENVELOPE);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -4347,6 +4424,7 @@ function init(){
   bindEnvToggle('cEnvCeil',  'cEnvCeil');
   // Debug stage toggles — same shape as envelope toggles (flip → rebuild).
   bindEnvToggle('debugEnvelope', 'debugEnvelope');
+  bindEnvToggle('debugEnvelopeViz', 'debugEnvelopeViz');
   bindEnvToggle('debugStamps',   'debugStamps');
   bindEnvToggle('debugBlur',     'debugBlur');
   bindEnvToggle('debugLumaLook', 'debugLumaLook');
@@ -4461,7 +4539,7 @@ function init(){
     // Post-stages
     'smoothness', 'lumaLook', 'lutStrength',
     // Debug toggles
-    'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
+    'debugEnvelope', 'debugEnvelopeViz', 'debugStamps', 'debugBlur', 'debugLumaLook',
   ];
   function serializeLutPreset(){
     const out = {};
@@ -4497,7 +4575,7 @@ function init(){
     // Refresh toggles (envelope + debug stages)
     const toggleIds = [
       'lEnvFloor', 'lEnvCeil', 'cEnvFloor', 'cEnvCeil',
-      'debugEnvelope', 'debugStamps', 'debugBlur', 'debugLumaLook',
+      'debugEnvelope', 'debugEnvelopeViz', 'debugStamps', 'debugBlur', 'debugLumaLook',
     ];
     for (const id of toggleIds){
       const el = document.getElementById(id);
