@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-21T09:33:59Z">
+<meta name="build" content="2026-05-21T09:35:21Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -40,7 +40,11 @@ main{
   gap:8px;padding:8px;min-height:0;overflow:hidden;
 }
 @media (max-width:1200px){
-  main{grid-template-columns:1fr;grid-template-rows:auto auto auto;overflow:auto}
+  /* Narrow / single-column layout: drop per-sidebar scrolling and let the
+     whole page scroll vertically (global scrollbar). */
+  body{height:auto;overflow:auto}
+  main{grid-template-columns:1fr;grid-template-rows:auto auto auto;overflow:visible}
+  aside,section.center{overflow:visible;min-height:0}
 }
 
 aside,section.center{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow-y:auto}
@@ -223,7 +227,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:33:59Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-21T09:35:21Z</span>
   </div>
 </header>
 
