@@ -262,7 +262,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div class="row tight">
       <button id="addColor" title="Append a mid-grey anchor">+ add</button>
       <button id="addBW" title="Append #000000 and #ffffff (skips duplicates)">+ b/w</button>
-      <button id="extractColors">extract from image</button>
       <button id="clearPalette">clear</button>
     </div>
   </section>
@@ -3090,25 +3089,25 @@ function loadAnimeImage(){
 // Real photos served from images/ subfolder. Drop the files there before
 // loading (filenames listed in images/README.md).
 function loadPortraitImage(){
-  loadImageFromSource('images/kodim04.jpg', 'photo · portrait (kodim04)');
+  loadImageFromSource('images/kodim04.png', 'photo · portrait (kodim04)');
 }
 function loadNatureImage(){
-  loadImageFromSource('images/kodim13.jpg', 'photo · nature (kodim13)');
+  loadImageFromSource('images/kodim13.png', 'photo · nature (kodim13)');
 }
 function loadParrotsImage(){
-  loadImageFromSource('images/kodim23.jpg', 'photo · parrots (kodim23)');
+  loadImageFromSource('images/kodim23.png', 'photo · parrots (kodim23)');
 }
 function loadStarryNightImage(){
   loadImageFromSource('images/starry-night.jpg', 'painting · Starry Night (van Gogh, public domain)');
 }
 function loadPortrait2Image(){
-  loadImageFromSource('images/portrait2.jpg', 'photo · portrait 2');
+  loadImageFromSource('images/portrait2.png', 'photo · portrait 2 (kodim15)');
 }
 function loadAnime2Image(){
   loadImageFromSource('images/anime2.jpg', 'image · anime (real)');
 }
 function loadLandscape2Image(){
-  loadImageFromSource('images/landscape2.jpg', 'photo · landscape 2');
+  loadImageFromSource('images/landscape2.png', 'photo · landscape 2 (kodim21)');
 }
 function loadGroupShotImage(){
   loadImageFromSource('images/groupshot.jpg', 'photo · group shot (full body, mixed)');
@@ -3124,77 +3123,6 @@ function updateImageInfo(){
 }
 
 /* =========================================================
-   PALETTE EXTRACTION (k-means in OkLab)
-   ========================================================= */
-function extractPaletteFromImage(K=5){
-  if (!state.image) return;
-  const SIZE = 96;
-  const tmp = document.createElement('canvas');
-  tmp.width = SIZE; tmp.height = SIZE;
-  const ctx = tmp.getContext('2d');
-  ctx.drawImage(state.image, 0, 0, SIZE, SIZE);
-  const px = ctx.getImageData(0,0,SIZE,SIZE).data;
-  const N = SIZE*SIZE;
-  const labs = new Float32Array(N*3);
-  for (let i=0;i<N;i++){
-    const r=px[i*4]/255, g=px[i*4+1]/255, b=px[i*4+2]/255;
-    const o = rgbToOklab(r,g,b);
-    labs[i*3]=o[0]; labs[i*3+1]=o[1]; labs[i*3+2]=o[2];
-  }
-  // init centroids: pick K well-spread points (k-means++ light)
-  const centroids = [];
-  const firstIdx = Math.floor(Math.random()*N);
-  centroids.push([labs[firstIdx*3], labs[firstIdx*3+1], labs[firstIdx*3+2]]);
-  while (centroids.length < K){
-    let bestIdx = 0, bestD = -1;
-    for (let i=0;i<N;i++){
-      let dMin = Infinity;
-      for (const c of centroids){
-        const dx = labs[i*3]-c[0], dy = labs[i*3+1]-c[1], dz = labs[i*3+2]-c[2];
-        const d = dx*dx+dy*dy+dz*dz;
-        if (d < dMin) dMin = d;
-      }
-      if (dMin > bestD){ bestD = dMin; bestIdx = i; }
-    }
-    centroids.push([labs[bestIdx*3], labs[bestIdx*3+1], labs[bestIdx*3+2]]);
-  }
-  // Lloyd iterations
-  for (let it=0; it<10; it++){
-    const sums = centroids.map(()=>[0,0,0,0]);
-    for (let i=0;i<N;i++){
-      let bestK = 0, bestD = Infinity;
-      for (let k=0;k<K;k++){
-        const c = centroids[k];
-        const dx = labs[i*3]-c[0], dy = labs[i*3+1]-c[1], dz = labs[i*3+2]-c[2];
-        const d = dx*dx+dy*dy+dz*dz;
-        if (d < bestD){ bestD = d; bestK = k; }
-      }
-      sums[bestK][0] += labs[i*3];
-      sums[bestK][1] += labs[i*3+1];
-      sums[bestK][2] += labs[i*3+2];
-      sums[bestK][3] += 1;
-    }
-    for (let k=0;k<K;k++){
-      if (sums[k][3] > 0){
-        centroids[k][0] = sums[k][0]/sums[k][3];
-        centroids[k][1] = sums[k][1]/sums[k][3];
-        centroids[k][2] = sums[k][2]/sums[k][3];
-      }
-    }
-  }
-  // Convert centroids back via Oklab→linear→sRGB
-  const hexes = centroids.map(c => {
-    const lin = oklabToLinearJS(c[0], c[1], c[2]);
-    const r = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[0])))));
-    const g = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[1])))));
-    const b = Math.max(0, Math.min(1, linearToSrgbC(Math.max(0, Math.min(1, lin[2])))));
-    return rgbToHex(r,g,b);
-  });
-  state.palette = hexes.map(h => ({hex:h, strength:1.0}));
-  renderSwatches();
-  paletteChanged();
-}
-
 function oklabToLinearJS(L,a,b){
   let l = L + 0.3963377774*a + 0.2158037573*b;
   let m = L - 0.1055613458*a - 0.0638541728*b;
@@ -3978,10 +3906,6 @@ function init(){
       renderSwatches();
       paletteChanged();
     }
-  });
-  document.getElementById('extractColors').addEventListener('click', () => {
-    setSelectedPresetBtn(null);
-    extractPaletteFromImage(5);
   });
   document.getElementById('clearPalette').addEventListener('click', () => {
     state.palette = [];

@@ -3,17 +3,17 @@
 The image-tab buttons in the UI load files from this folder. Drop the
 following files in here so the buttons work:
 
-| File                  | Tab button   | Source / notes |
-| --------------------- | ------------ | -------------- |
-| `kodim04.jpg`         | portrait     | Kodak Lossless True Color Image Suite (https://r0k.us/graphics/kodak/) — kodim04 (woman in red hat) |
-| `kodim13.jpg`         | nature       | Kodak suite — kodim13 (alpine stream) |
-| `kodim23.jpg`         | parrots      | Kodak suite — kodim23 (vivid macaws) |
-| `starry-night.jpg`    | starry night | Van Gogh — *The Starry Night* (public domain). Wikimedia: https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg |
-| `portrait2.jpg`       | portrait 2   | Any second portrait test (your choice — skin tones, neutral background) |
-| `anime2.jpg`          | anime 2      | A rights-free anime / cel-shaded illustration (Creative Commons or public domain) |
-| `landscape2.jpg`      | landscape 2  | A second landscape test (kodim14 lakefront and kodim21 lighthouse-and-coast from the Kodak suite work well) |
-| `groupshot.jpg`       | group shot   | Full-body shot with mixed-race subjects (your choice — varied skin tones, common color-grading test case) |
-| `gamescreen.jpg`      | game shot    | A video-game screenshot (stylized / saturated palette test) |
+| File                  | Tab button   | Status | Source / notes |
+| --------------------- | ------------ | ------ | -------------- |
+| `kodim04.png`         | portrait     | ✓ in repo | Kodak Lossless True Color Image Suite (https://r0k.us/graphics/kodak/) — kodim04 (woman in red hat) |
+| `kodim13.png`         | nature       | ✓ in repo | Kodak suite — kodim13 (alpine stream) |
+| `kodim23.png`         | parrots      | ✓ in repo | Kodak suite — kodim23 (vivid macaws) |
+| `starry-night.jpg`    | starry night | ✓ in repo | Van Gogh — *The Starry Night* (public domain). Wikimedia: https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg |
+| `portrait2.png`       | portrait 2   | ✓ in repo (kodim15) | Kodak suite — kodim15 (woman by stairs). Swap for any other portrait if you want |
+| `landscape2.png`      | landscape 2  | ✓ in repo (kodim21) | Kodak suite — kodim21 (lighthouse + sailboats) |
+| `anime2.jpg`          | anime 2      | ✗ needs file | A rights-free anime / cel-shaded illustration (Creative Commons or public domain). Drop the file here. |
+| `groupshot.jpg`       | group shot   | ✗ needs file | Full-body shot with mixed-race subjects (your choice — varied skin tones, common color-grading test case). Drop the file here. |
+| `gamescreen.jpg`      | game shot    | ✗ needs file | A video-game screenshot (stylized / saturated palette test). Drop the file here. |
 
 Reasonable sizing: long edge around 720–1280 px keeps the LUT preview
 snappy. The page loader downscales anything larger via `MAX_DIM`.
