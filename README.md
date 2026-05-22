@@ -1,12 +1,19 @@
 # SoftPalette
-Creates LUTs for soft palette color matching.
-Palette-based color grading via 3D LUT. Smooth-snap any image to your palette's hues while keeping continuous gradients.
+Map any image into a palette you choose. SoftPalette turns a handful of
+hex colors into a smooth color grade — anchored to your palette where
+the image hits a palette hue, blending continuously between them
+everywhere else.
+
+## Try it
+- Main: <https://manuelkugelmann.github.io/SoftPalette/>
+- Branch: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
 
 ## Usage
-- Drop an image.
-- Pick a palette (preset, extract-from-image, or hand-roll hex colors).
-- The tool builds a 17³ 3D LUT where every cell is mapped to the nearest palette anchor's hue, with smooth chroma falloff between anchors.
-- The result is applied to the image. Drag anywhere on the canvas to scrub a before/after split.
+- Drop an image (or paste with Ctrl+V, or click to browse).
+- Pick a palette (one of the presets, extract from the image, or hand-roll
+  hex colors — up to 256).
+- The result is applied live to the canvas. Drag anywhere on it to scrub
+  a before / after split.
 
 ## Use cases
 - Stylize photos to a game's palette (Quake, Moebius, Ghibli presets included).
@@ -15,41 +22,61 @@ Palette-based color grading via 3D LUT. Smooth-snap any image to your palette's 
 - Explore how a palette feels in continuous tone.
 
 ## Controls
-| Section | What it does |
+
+Two algorithms — pick one with the tabs at the top of the LUT params card.
+
+**IDW** blends every palette anchor with distance-weighted falloff. Smooth,
+painterly transitions between hues.
+
+**Stripes** snaps every cell to its nearest palette hue (Voronoi by hue
+distance), keeping the cell's own L and chroma magnitude. Then iterates
+`stripe iters` times: blur the whole cube, restamp only cells near a
+seed hue. Graphical, posterised look with distinct hue regions.
+
+Both methods share the same controls and presets — only step 1 of the
+build differs (IDW Shepard bake vs Stripes hue-ray stamps).
+
+| Control | What it does |
 |---|---|
-| **image** | Drop, paste (Ctrl+V), click to browse, or pick a built-in test image |
-| **presets** | Curated palette presets — click to apply. `SlimQuake` is a hue-deduped subset of `FullQuake` |
-| **palette** | Swatch grid (left column). Edit hex, delete, add new, extract from current image, or clear |
-| **lut params · presets row** | One-click bundles: `default`, `+50`, `+100`, `+200` (envelope boost) |
-| **stripe thickness** | Width of each palette anchor's "stripe" in hue space (radians) |
-| **smoothness** | Iterations of blur+restamp during LUT build (higher = smoother gradients) |
-| **L floor / ceil** | Clamp output lightness range |
-| **chroma floor / ceil** | Clamp output chroma range |
-| **palette envelope** | When on, per-hue chroma is capped to a smooth envelope of palette anchors |
-| **envelope boost** | Inflates the envelope by 0–200% (boost beyond strict palette while keeping shape) |
-| **L blur ratio** | 0 = blur only in chroma axes (preserves L contrast), 1 = isotropic 3D blur |
-| **lut strength** | Blends LUT output with identity (passthrough). 0% = original, 100% = full LUT |
-| **extend palette** | Synthesizes muted ghost anchors in wide hue gaps so missing hues don't collapse |
-| **gap threshold** | Minimum gap (rad) that triggers synthesis |
-| **synth mutedness** | Synth chroma relative to neighbors: 0 = full inheritance, 1 = grey |
+| image | Drop / paste / browse, or pick a built-in test image |
+| presets | Curated palettes (Quake, Moebius, Ghibli, …). Click to apply |
+| palette | Swatch grid. Click → color picker. Right-click → remove. Up to 256 |
+| extend palette | Auto-extend each anchor with a constellation of luma / chroma / hue variants. Fills the palette out without you adding every shade by hand |
+| lut size | 17 → 257 cube edges. Higher = more precise, slightly slower |
+| luma anchor range / chroma anchor range | Anchor pull radius in luma vs chroma. Tight = sharp regions, wide = washy blends |
+| anchor softness | IDW: Shepard exponent (low = mushy, high = near-Voronoi). Stripes: unused |
+| reach | Distance beyond which the palette gives up — far-out colors desaturate instead of latching to a wrong hue |
+| anchor hue range | IDW: soft hue-gate width. Stripes: restamp tolerance during iters (cells within this hue distance of a seed get restamped after each blur) |
+| stripe iters | Stripes only: number of (blur → restamp narrow stripes) iterations after the initial Voronoi rotation. 0 = raw Voronoi rotation, higher = smoother bleed between hue regions |
+| luma blend / chroma blend | Keep image structure (1) or snap to palette values (0) on each axis |
+| luma envelope ± + floor / ceil | Limit how far output luma can go from the palette's natural luma range. Toggle floor / ceil to disable that side |
+| chroma envelope ± + floor / ceil | Same idea for chroma — limit how saturated outputs can get relative to the palette |
+| blur | Post-build blur+restamp iterations. For Stripes this is also what diffuses the 1-cell stripes into the neutral background (0 = raw stripes visible) |
+| luma look | Tints output toward the palette's natural dark / light hue bias. Applied late (rotates LUT cells, palette anchors preserved). Slider doesn't trigger a rebuild — instant feedback |
+| lut blend | Mix the result with the original. 100 % = full effect |
 
-## Algorithm
-1. **Seeds**: each palette color → an OkLab cell, stored as `(L, a, b, h, C)`.
-2. **Voronoi by hue**: every LUT cell gets assigned to its nearest seed by
-   angular hue distance.
-3. **Stamping**: cells inside a seed's hue stripe (`stripeThickness` rad) are
-   clamped to that seed's hue with chroma capped by the envelope.
-4. **Iterative blur**: separable 3D Gaussian blur of the LUT, anisotropic so
-   chroma axes blur more than lightness. Followed by re-stamping. Repeats
-   `smoothness` times. This is what produces smooth gradients between
-   anchors.
-5. **Envelope**: a smooth per-hue chroma ceiling built from the seed
-   chromas, falloff radius = `4 × stripeThickness`. Optional `envelopeBoost`
-   inflates uniformly.
-6. **Palette extension** (optional): finds hue gaps wider than threshold,
-   inserts distance-weighted synthetic anchors with chroma `lerp(boundary_C) × (1−mutedness)`.
-   Distinct in the swatch UI (dashed border, "SYNTH" label, read-only).
+## How it works (short version)
 
-### LUT layout
-The LUT is a 17×17×17 atlas stored as a 2D texture (289×17 pixels), packed
-as `(L_slice × N + a_idx, b_idx)`. Trilinear lookup in shader.
+Both algorithms build a 3D LUT — one cell per (luma, chroma_a, chroma_b)
+position in OkLab space — and the image is mapped through it on the GPU.
+
+- **IDW**: each LUT cell is a distance-weighted blend of all palette anchors
+  in OkLab, with chroma kept honest where anchors agree on a hue and falling
+  back to grey where they don't. Built entirely on the GPU.
+- **Stripes**: every cell gets Voronoi-snapped to its nearest seed's hue
+  (cell keeps its own L and chroma magnitude). Then `stripe iters`
+  iterations of (3D blur the whole cube, restamp cells within
+  `anchor hue range` of any seed) interleave smoothing with hue locking.
+  Built on the CPU and uploaded.
+
+After step 1, both methods run the **identical** late-stage pipeline:
+anchor stamp → smoothness blur+restamp loop → reach desaturation → luma
+look.
+
+After either build, **luma look** runs as a late stage that rotates each
+non-anchor cell's chroma direction toward the palette's natural dark /
+light hue bias — the "cool shadows, warm highlights" feel for teal-orange
+type palettes. Palette anchor cells are restamped after to stay exact.
+
+The LUT is sampled per-pixel with hardware trilinear filtering, converted
+back to sRGB, and displayed.
