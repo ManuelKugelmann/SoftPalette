@@ -6,7 +6,7 @@ everywhere else.
 
 ## Try it
 - Main: <https://manuelkugelmann.github.io/SoftPalette/>
-- Branch: <https://raw.githack.com/ManuelKugelmann/SoftPalette/claude/extend-256-color-palette-b6Lmh/index.html>
+- Branch: <https://raw.githack.com/ManuelKugelmann/SoftPalette/main/index.html>
 
 ## Usage
 - Drop an image (or paste with Ctrl+V, or click to browse).
