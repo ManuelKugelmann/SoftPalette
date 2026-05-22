@@ -11,9 +11,9 @@ following files in here so the buttons work:
 | `starry-night.jpg`    | starry night | ✓ in repo | Van Gogh — *The Starry Night* (public domain). Wikimedia: https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg |
 | `portrait2.png`       | portrait 2   | ✓ in repo (kodim15) | Kodak suite — kodim15 (woman by stairs). Swap for any other portrait if you want |
 | `landscape2.png`      | landscape 2  | ✓ in repo (kodim21) | Kodak suite — kodim21 (lighthouse + sailboats) |
-| `anime2.jpg`          | anime 2      | ✗ needs file | A rights-free anime / cel-shaded illustration (Creative Commons or public domain). Drop the file here. |
-| `groupshot.jpg`       | group shot   | ✗ needs file | Full-body shot with mixed-race subjects (your choice — varied skin tones, common color-grading test case). Drop the file here. |
-| `gamescreen.jpg`      | game shot    | ✗ needs file | A video-game screenshot (stylized / saturated palette test). Drop the file here. |
+| `anime2.png`          | anime 2      | ✓ in repo | *Brendo magical girl* — Wikimedia Commons, CC-licensed anime-style illustration |
+| `groupshot.jpg`       | group shot   | ✓ in repo | 2007 Intel 45nm Processor Launch Ceremony in Taiwan — Wikimedia Commons. Multi-person event photo. |
+| `gamescreen.png`      | game shot    | ✓ in repo | SuperTuxKart 0.6rc1 screenshot — Wikimedia Commons, CC-BY-SA-3.0 |
 
 Reasonable sizing: long edge around 720–1280 px keeps the LUT preview
 snappy. The page loader downscales anything larger via `MAX_DIM`.
