@@ -161,28 +161,32 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
 #canvas{display:block;max-width:100%;max-height:100%;image-rendering:auto}
 #canvasWrap.empty #canvas{display:none}
 
+/* Old/new split — subtle but visible. Thin neutral line + small caps so
+   the comparison handle reads as a guide, not a UI accent. */
 #splitLine{
-  position:absolute;top:0;bottom:0;width:1px;background:var(--ac);
+  position:absolute;top:0;bottom:0;width:1px;
+  background:rgba(255,255,255,0.35);
   pointer-events:none;display:none;z-index:2;
+  mix-blend-mode:difference;
 }
 #splitLine::before,#splitLine::after{
   content:"";position:absolute;left:50%;transform:translateX(-50%);
-  background:var(--ac);width:9px;height:9px;
+  background:rgba(255,255,255,0.55);width:5px;height:5px;border-radius:50%;
 }
-#splitLine::before{top:8px}
-#splitLine::after{bottom:8px}
+#splitLine::before{top:6px}
+#splitLine::after{bottom:6px}
 #canvasWrap.has-image #splitLine{display:block}
 
-/* Center handle: grabbable bar at vertical midpoint */
+/* Center handle: small grabbable bar at vertical midpoint */
 #splitHandle{
   position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:14px;height:36px;background:var(--ac);
-  border:1px solid var(--bg);border-radius:2px;
-  display:none;align-items:center;justify-content:center;gap:2px;
-  pointer-events:none;
+  width:8px;height:22px;background:rgba(255,255,255,0.45);
+  border:1px solid rgba(0,0,0,0.35);border-radius:2px;
+  display:none;align-items:center;justify-content:center;gap:1px;
+  pointer-events:none;mix-blend-mode:difference;
 }
 #splitHandle::before,#splitHandle::after{
-  content:"";width:1px;height:14px;background:var(--bg);
+  content:"";width:1px;height:10px;background:rgba(0,0,0,0.55);
 }
 #canvasWrap.has-image #splitHandle{display:flex}
 
@@ -3110,10 +3114,10 @@ function loadLandscape2Image(){
   loadImageFromSource('images/landscape2.png', 'photo · landscape 2 (kodim21)');
 }
 function loadGroupShotImage(){
-  loadImageFromSource('images/groupshot.jpg', 'photo · group shot (Intel ceremony, Wikimedia)');
+  loadImageFromSource('images/groupshot.jpg', 'photo · Lathmar Holi 2022, Nandgaon (Wikimedia)');
 }
 function loadGameShotImage(){
-  loadImageFromSource('images/gamescreen.png', 'screenshot · SuperTuxKart (CC-BY-SA)');
+  loadImageFromSource('images/gamescreen.png', 'screenshot · 0 A.D. (Wikimedia, CC-BY-SA)');
 }
 
 function updateImageInfo(){
@@ -3123,6 +3127,8 @@ function updateImageInfo(){
 }
 
 /* =========================================================
+   OKLAB → LINEAR SRGB CONVERSION
+   ========================================================= */
 function oklabToLinearJS(L,a,b){
   let l = L + 0.3963377774*a + 0.2158037573*b;
   let m = L - 0.1055613458*a - 0.0638541728*b;
