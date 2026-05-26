@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-05-24T18:14:55Z">
+<meta name="build" content="2026-05-26T22:44:04Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -161,34 +161,15 @@ input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);
 #canvas{display:block;max-width:100%;max-height:100%;image-rendering:auto}
 #canvasWrap.empty #canvas{display:none}
 
-/* Old/new split — subtle but visible. Thin neutral line + small caps so
-   the comparison handle reads as a guide, not a UI accent. */
+/* Old/new split — subtle but visible. Thin neutral line, no handle; the
+   ew-resize cursor over the canvas is the only affordance. */
 #splitLine{
   position:absolute;top:0;bottom:0;width:1px;
   background:rgba(255,255,255,0.35);
   pointer-events:none;display:none;z-index:2;
   mix-blend-mode:difference;
 }
-#splitLine::before,#splitLine::after{
-  content:"";position:absolute;left:50%;transform:translateX(-50%);
-  background:rgba(255,255,255,0.55);width:5px;height:5px;border-radius:50%;
-}
-#splitLine::before{top:6px}
-#splitLine::after{bottom:6px}
 #canvasWrap.has-image #splitLine{display:block}
-
-/* Center handle: small grabbable bar at vertical midpoint */
-#splitHandle{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:8px;height:22px;background:rgba(255,255,255,0.45);
-  border:1px solid rgba(0,0,0,0.35);border-radius:2px;
-  display:none;align-items:center;justify-content:center;gap:1px;
-  pointer-events:none;mix-blend-mode:difference;
-}
-#splitHandle::before,#splitHandle::after{
-  content:"";width:1px;height:10px;background:rgba(0,0,0,0.55);
-}
-#canvasWrap.has-image #splitHandle{display:flex}
 
 /* Drag affordance: ew-resize cursor over the canvas when image is loaded */
 #canvasWrap.has-image{cursor:ew-resize}
@@ -233,7 +214,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-24T18:14:55Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-05-26T22:44:04Z</span>
   </div>
 </header>
 
@@ -250,13 +231,22 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="noir">noir·neon</button>
       <button data-preset="pastel">pastel</button>
       <button data-preset="rgb">r·g·b</button>
-      <button data-preset="office" title="MS-Office accent style: teal, yellow, berry, navy, lime">office</button>
-      <button data-preset="solarized" title="Ethan Schoonover's 8 accent hues">solarized</button>
+      <button data-preset="office" title="MS-Office accent style: teal, yellow, berry, cherry red, navy, lime">office</button>
       <button data-preset="nord" title="Nord — frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — vivid neon accents">dracula</button>
+    </div>
+    <!-- Quake palettes on their own full-width row (equal-width = one line) -->
+    <div class="row tight full">
       <button data-preset="Quake256" title="Full canonical 256-entry Quake 1 palette (gfx/palette.lmp)">Quake256</button>
       <button data-preset="Quake28"  title="28 representative entries — one max-chroma anchor per Quake hue bin + greys">Quake28</button>
       <button data-preset="Quake15"  title="15 entries — Quake28 with near-duplicate hues collapsed">Quake15</button>
+    </div>
+    <!-- Retro hardware palettes -->
+    <div class="row tight">
+      <button data-preset="NES" title="Canonical NES (2C02) hardware palette — ~54 colors. SNES had no fixed palette (15-bit RGB)">(S)NES</button>
+      <button data-preset="EGA" title="IBM EGA / CGA default 16-colour palette">EGA</button>
+      <button data-preset="CGA" title="IBM CGA mode-4 palette 1 (high): black, cyan, magenta, white">CGA</button>
+      <button data-preset="phosphor" title="Early-PC monochrome phosphors: amber/orange, green, paper-white (on black)">phosphor</button>
     </div>
   </section>
 
@@ -298,23 +288,25 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <div id="imageTabs" class="tabs">
     <button id="hueImage"        class="tab tab-synth" title="Synthetic: Hue × Lightness gradient — Ok-HPLuv-boost with per-hue peaks in the upper third">hues</button>
     <button id="resetImage"      class="tab tab-synth" title="Synthetic: sunset landscape">sunset</button>
-    <button id="photoImage"      class="tab tab-synth" title="Synthetic: still-life (apples on wood)">still-life</button>
     <button id="landscapeImage"  class="tab tab-synth" title="Synthetic: landscape — atmospheric depth, greens">landscape</button>
-    <button id="animeImage"      class="tab tab-synth" title="Synthetic: anime-style scene — sakura, cel-shaded mountains">anime</button>
-    <button id="portraitImage"   class="tab" title="Real photo: Kodak kodim04 (skin tones, red fabric)">portrait</button>
+    <button id="portraitImage"   class="tab" title="Real photo: modern portrait — Gonzalo Bazgan (Wikimedia, CC-BY) — man, soft colourful backdrop">portrait</button>
     <button id="natureImage"     class="tab" title="Real photo: Kodak kodim13 (alpine stream, foliage, sky)">nature</button>
     <button id="parrotsImage"    class="tab" title="Real photo: Kodak kodim23 (vivid macaws — high saturation, full hue circle)">parrots</button>
+    <button id="colorfulImage"   class="tab" title="Real photo: Lathmar Holi 2022, Nandgaon — color-powder crowd, full hue circle (Wikimedia)">colorful</button>
     <button id="starryNight"     class="tab" title="Painting: Van Gogh — The Starry Night (public domain)">starry night</button>
-    <button id="portrait2Image"  class="tab" title="Real photo: second portrait test image">portrait 2</button>
-    <button id="anime2Image"     class="tab" title="Real anime image (rights-free)">anime 2</button>
-    <button id="landscape2Image" class="tab" title="Real photo: second landscape test image">landscape 2</button>
-    <button id="groupShotImage"  class="tab" title="Real photo: full-body group shot with mixed-race subjects">group shot</button>
-    <button id="gameShotImage"   class="tab" title="Video game screenshot (saturated, stylized)">game shot</button>
+    <button id="waveImage"       class="tab" title="Painting: Hokusai — The Great Wave off Kanagawa (public domain) — Prussian blues, woodblock">the wave</button>
+    <button id="monaLisaImage"   class="tab" title="Painting: Leonardo — Mona Lisa (public domain) — muted earth tones, sfumato">mona lisa</button>
+    <button id="candidImage"     class="tab" title="Real photo: modern portrait — R. Sharma, Jaipur (Wikimedia, CC-BY) — person of colour, warm tones">candid</button>
+    <button id="mangaImage"      class="tab" title="Anime: Wikipe-tan — Wikipedia's mascot (CC-BY-SA) — flat anime shading, blue/navy/white">manga</button>
+    <button id="lakeImage"       class="tab" title="Real photo: Llao Llao, Argentina (Wikimedia) — turquoise lake, forest, mountains">lake</button>
+    <button id="crowdImage"      class="tab" title="Real photo: Kumbh Mela crowd, Prayagraj (Wikimedia) — dense crowd, varied skin tones + vivid clothing">crowd</button>
+    <button id="strategyImage"   class="tab" title="Video game screenshot: 0 A.D. real-time strategy (saturated, stylized)">strategy</button>
+    <button id="shooterImage"    class="tab" title="Video game screenshot: Xonotic FPS (CC) — sci-fi blues, orange explosion">shooter</button>
     <button id="loadFile"        class="tab tab-file" title="Click to browse, or drop / paste an image onto the canvas">file…</button>
   </div>
   <div id="canvasWrap" class="empty">
     <canvas id="canvas"></canvas>
-    <div id="splitLine"><div id="splitHandle"></div></div>
+    <div id="splitLine"></div>
   </div>
   <input type="file" id="fileInput" accept="image/*" hidden>
   <div id="bottomBar">
@@ -337,7 +329,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     </div>
     <div class="row full" style="margin-bottom:8px;display:flex;flex-wrap:nowrap;gap:4px">
       <button data-lutpreset="basic"     title="Subtle palette effect — image structure mostly preserved">basic</button>
-      <button data-lutpreset="wash"      title="Extreme soft — palette adds a faint wash of color">wash</button>
       <button data-lutpreset="soft"      title="Gentle blend, image structure clear">soft</button>
       <button data-lutpreset="balanced"  title="Middle of the road">balanced</button>
       <button data-lutpreset="vivid"     title="Sharp hue separation, wide L acceptance">vivid</button>
@@ -466,15 +457,41 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
 </main>
 
+<footer>
+  <span>SoftPalette — palette-driven LUT colour grading · © Manuel Kugelmann, Bitcraft IT Consulting</span>
+  <details style="margin-top:6px;max-width:780px;margin-left:auto;margin-right:auto">
+    <summary style="cursor:pointer">test-image credits &amp; licenses</summary>
+    <p style="margin:6px 0">CC / GPL works via
+      <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>.
+      Licenses:
+      <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>,
+      <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>,
+      <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>,
+      <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL</a>.
+      Images used unmodified except where noted (resized; Wikipe-tan flattened onto white).</p>
+    <ul style="margin:0;padding-left:18px;line-height:1.7;text-align:left">
+      <li><b>portrait</b> — Gonzalo Bazgan (Wikiconf 2026) © Ezarate · CC BY 4.0</li>
+      <li><b>candid</b> — Riddhi Sharma (Jaipur Literature Festival 2026) © Suyash Dwivedi · CC BY-SA 4.0</li>
+      <li><b>colorful</b> — Lathmar Holi 2022, Nandgaon © Sachinghai09 / Radomianin · CC BY-SA 4.0</li>
+      <li><b>lake</b> — Llao Llao Peninsula © Fernando · CC BY-SA 4.0</li>
+      <li><b>crowd</b> — Kumbh Mela 2019, Prayagraj © Michael T Balonek · CC BY-SA 4.0</li>
+      <li><b>manga</b> — Wikipe-tan © Kasuga &amp; Editor at Large · CC BY-SA 3.0 (flattened onto white)</li>
+      <li><b>strategy</b> — 0 A.D. © Wildfire Games · CC BY-SA 3.0</li>
+      <li><b>shooter</b> — Xonotic © Team Xonotic · GPL</li>
+      <li><b>nature</b>, <b>parrots</b> — Kodak Lossless True Color Image Suite (free research set)</li>
+      <li><b>starry night</b> (van Gogh) · <b>the wave</b> (Hokusai) · <b>mona lisa</b> (Leonardo) — public domain</li>
+      <li><b>hues</b>, <b>sunset</b>, <b>landscape</b> — generated procedurally in-app</li>
+    </ul>
+  </details>
+</footer>
+
 
 <!-- Procedural test images — kept separate so the main file stays focused
      on the LUT pipeline. Loaded before the main script so the make*
-     globals (makeDefaultImage, makePhotoImage, makeLandscapeImage,
-     makeAnimeImage) exist by the time the loaders try to call them. -->
+     globals (makeDefaultImage, makeLandscapeImage) exist by the time the
+     loaders call them. -->
 <script src="synth/sunset.js"></script>
-<script src="synth/still-life.js"></script>
 <script src="synth/landscape.js"></script>
-<script src="synth/anime.js"></script>
 
 <script>
 'use strict';
@@ -500,14 +517,36 @@ const PRESETS = {
   'noir':        ['#1a1a1f','#5a4a78','#e83a78','#3ad8e8'],
   'pastel':      ['#f4c8d8','#c8e0f4','#d8f4c8','#f4e8c8','#e0c8f4'],
   'rgb':         ['#e83a3a','#3ae83a','#3a3ae8'],
-  // MS-Office accent style: teal/yellow/berry/navy/lime
-  'office':      ['#1abc9c','#f1c40f','#c2185b','#1a237e','#2ecc71'],
-  // Solarized (Ethan Schoonover) — 8 accent hues, base16 omitted
-  'solarized':   ['#b58900','#cb4b16','#dc322f','#d33682','#6c71c4','#268bd2','#2aa198','#859900'],
+  // MS-Office accent style: teal/yellow/berry/cherry/navy/lime
+  'office':      ['#1abc9c','#f1c40f','#c2185b','#d2042d','#1a237e','#2ecc71'],
   // Nord — frost (cool blues) + aurora (warm accents)
   'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
   // Dracula — vivid neon accents
   'dracula':     ['#ff79c6','#bd93f9','#8be9fd','#50fa7b','#f1fa8c','#ffb86c','#ff5555','#6272a4'],
+  // Canonical NES (2C02) hardware palette — the ~54 distinct colors of the
+  // 64-slot table, with the repeated pure-blacks collapsed to one. The SNES
+  // had no fixed hardware palette (15-bit RGB), so this is the NES set.
+  'NES':         [
+    '#7c7c7c','#0000fc','#0000bc','#4428bc','#940084','#a80020','#a81000','#881400',
+    '#503000','#007800','#006800','#005800','#004058','#000000',
+    '#bcbcbc','#0078f8','#0058f8','#6844fc','#d800cc','#e40058','#f83800','#e45c10',
+    '#ac7c00','#00b800','#00a800','#00a844','#008888',
+    '#f8f8f8','#3cbcfc','#6888fc','#9878f8','#f878f8','#f85898','#f87858','#fca044',
+    '#f8b800','#b8f818','#58d854','#58f898','#00e8d8','#787878',
+    '#fcfcfc','#a4e4fc','#b8b8f8','#d8b8f8','#f8b8f8','#f8a4c0','#f0d0b0','#fce0a8',
+    '#f8d878','#d8f878','#b8f8b8','#b8f8d8','#00fcfc','#f8d8f8',
+  ],
+  // IBM EGA / CGA default 16-colour palette (CGA's brown at index 6 instead
+  // of dark yellow). EGA could remap from 64 colours; this is the boot default.
+  'EGA':         [
+    '#000000','#0000aa','#00aa00','#00aaaa','#aa0000','#aa00aa','#aa5500','#aaaaaa',
+    '#555555','#5555ff','#55ff55','#55ffff','#ff5555','#ff55ff','#ffff55','#ffffff',
+  ],
+  // IBM CGA mode-4 palette 1, high-intensity — the iconic 4-colour look.
+  'CGA':         ['#000000','#55ffff','#ff55ff','#ffffff'],
+  // Early-PC monochrome monitor phosphors: amber (orange), P1 green, paper-white,
+  // on black. Not one palette historically — the three common CRT phosphor tints.
+  'phosphor':    ['#000000','#ffb000','#33ff33','#ffffff'],
   // Quake 1 hue-binned subset: max-chroma anchor per hue bin + scrag-green
   // pair (#e7e357,#c7c337) + 3 grey anchors. 28 entries.
   'Quake28':     ['#5f333f','#231313','#ff0000','#b7330f','#cf632b','#e3974f','#cf8f2b','#dfab27','#efcb1f','#fff31b','#e7e357','#c7c337','#172317','#233327','#2f4337','#6f837b','#d7ffff','#abe7ff','#7fbfff','#0000ff','#2b2baf','#8b8bcb','#9f7f97','#bb739f','#975777','#1f1f1f','#7b7b7b','#cbcbcb'],
@@ -647,16 +686,16 @@ const state = {
   // Initial values mirror the boot defaults (sunset image, teal-orange palette).
   selectedImageBtn: 'hueImage',
   selectedPresetBtn: 'cold-warm',
-  // Active LUT preset name (wash / soft / …) or null. Set by applyLutPreset,
+  // Active LUT preset name (basic / soft / …) or null. Set by applyLutPreset,
   // cleared by any manual slider / toggle / method change.
   activePreset: null,
 };
 
 const IMAGE_BTN_IDS = [
-  'hueImage', 'resetImage', 'photoImage', 'landscapeImage', 'animeImage',
-  'portraitImage', 'natureImage', 'parrotsImage',
-  'starryNight', 'portrait2Image', 'anime2Image', 'landscape2Image',
-  'groupShotImage', 'gameShotImage',
+  'hueImage', 'resetImage', 'landscapeImage',
+  'portraitImage', 'natureImage', 'parrotsImage', 'colorfulImage',
+  'starryNight', 'waveImage', 'monaLisaImage', 'candidImage', 'mangaImage', 'lakeImage',
+  'crowdImage', 'strategyImage', 'shooterImage',
 ];
 
 function refreshSelectionUI(){
@@ -1589,6 +1628,12 @@ function stampAnchors(targetTex, N, seeds){
   const prog = state.programs.lutStamp;
   gl.useProgram(prog);
   gl.bindVertexArray(state.vao);
+  // Bind our own FBO — some callers run right after a pass that unbound it
+  // (applyReachPass / applyLEnvelopePass each restore the default FBO), so
+  // we can't assume one is bound. We leave it bound on exit because the
+  // blur loop in applyLateStages relies on the FBO staying attached.
+  if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
   const uLab = gl.getUniformLocation(prog, 'uStampLab');
   gl.viewport(0, 0, N, N);
   gl.enable(gl.SCISSOR_TEST);
@@ -3080,20 +3125,14 @@ function loadDefaultImage(){
 function loadHueImage(){
   installCanvas(makeHuePickerImage(), 'synthetic · hue picker');
 }
-function loadPhotoImage(){
-  installCanvas(makePhotoImage(), 'synthetic · still life');
-}
 function loadLandscapeImage(){
   installCanvas(makeLandscapeImage(), 'synthetic · landscape');
-}
-function loadAnimeImage(){
-  installCanvas(makeAnimeImage(), 'synthetic · anime');
 }
 
 // Real photos served from images/ subfolder. Drop the files there before
 // loading (filenames listed in images/README.md).
 function loadPortraitImage(){
-  loadImageFromSource('images/kodim04.png', 'photo · portrait (kodim04)');
+  loadImageFromSource('images/portrait.jpg', 'photo · Gonzalo Bazgan (Wikimedia, CC-BY)');
 }
 function loadNatureImage(){
   loadImageFromSource('images/kodim13.png', 'photo · nature (kodim13)');
@@ -3104,20 +3143,32 @@ function loadParrotsImage(){
 function loadStarryNightImage(){
   loadImageFromSource('images/starry-night.jpg', 'painting · Starry Night (van Gogh, public domain)');
 }
-function loadPortrait2Image(){
-  loadImageFromSource('images/portrait2.png', 'photo · portrait 2 (kodim15)');
+function loadWaveImage(){
+  loadImageFromSource('images/wave.jpg', 'painting · The Great Wave (Hokusai, public domain)');
 }
-function loadAnime2Image(){
-  loadImageFromSource('images/anime2.png', 'image · anime (Brendo magical girl, CC)');
+function loadMonaLisaImage(){
+  loadImageFromSource('images/monalisa.jpg', 'painting · Mona Lisa (Leonardo, public domain)');
 }
-function loadLandscape2Image(){
-  loadImageFromSource('images/landscape2.png', 'photo · landscape 2 (kodim21)');
+function loadCandidImage(){
+  loadImageFromSource('images/candid.jpg', 'photo · R. Sharma, Jaipur (Wikimedia, CC-BY)');
 }
-function loadGroupShotImage(){
+function loadColorfulImage(){
   loadImageFromSource('images/groupshot.jpg', 'photo · Lathmar Holi 2022, Nandgaon (Wikimedia)');
 }
-function loadGameShotImage(){
-  loadImageFromSource('images/gamescreen.png', 'screenshot · 0 A.D. (Wikimedia, CC-BY-SA)');
+function loadMangaImage(){
+  loadImageFromSource('images/manga.png', 'anime · Wikipe-tan (CC-BY-SA, Wikimedia)');
+}
+function loadLakeImage(){
+  loadImageFromSource('images/lake.jpg', 'photo · Llao Llao, Argentina (Wikimedia)');
+}
+function loadCrowdImage(){
+  loadImageFromSource('images/crowd.jpg', 'photo · Kumbh Mela, Prayagraj (Wikimedia)');
+}
+function loadStrategyImage(){
+  loadImageFromSource('images/strategy.png', 'screenshot · 0 A.D. RTS (Wikimedia, CC-BY-SA)');
+}
+function loadShooterImage(){
+  loadImageFromSource('images/shooter.jpg', 'screenshot · Xonotic FPS (Wikimedia, CC)');
 }
 
 function updateImageInfo(){
@@ -3876,18 +3927,20 @@ function init(){
   }
   bindImageBtn('resetImage',     loadDefaultImage);
   bindImageBtn('hueImage',       loadHueImage);
-  bindImageBtn('photoImage',     loadPhotoImage);
-  bindImageBtn('portraitImage',  loadPortraitImage);
   bindImageBtn('landscapeImage', loadLandscapeImage);
-  bindImageBtn('animeImage',     loadAnimeImage);
+  bindImageBtn('portraitImage',  loadPortraitImage);
   bindImageBtn('natureImage',     loadNatureImage);
   bindImageBtn('parrotsImage',    loadParrotsImage);
+  bindImageBtn('colorfulImage',   loadColorfulImage);
   bindImageBtn('starryNight',     loadStarryNightImage);
-  bindImageBtn('portrait2Image',  loadPortrait2Image);
-  bindImageBtn('anime2Image',     loadAnime2Image);
-  bindImageBtn('landscape2Image', loadLandscape2Image);
-  bindImageBtn('groupShotImage',  loadGroupShotImage);
-  bindImageBtn('gameShotImage',   loadGameShotImage);
+  bindImageBtn('waveImage',       loadWaveImage);
+  bindImageBtn('monaLisaImage',   loadMonaLisaImage);
+  bindImageBtn('candidImage',     loadCandidImage);
+  bindImageBtn('mangaImage',      loadMangaImage);
+  bindImageBtn('lakeImage',       loadLakeImage);
+  bindImageBtn('crowdImage',      loadCrowdImage);
+  bindImageBtn('strategyImage',   loadStrategyImage);
+  bindImageBtn('shooterImage',    loadShooterImage);
 
   // Palette buttons
   document.getElementById('addColor').addEventListener('click', () => {
@@ -4049,9 +4102,8 @@ function init(){
   // Shared presets — IDW and Stripes consume the same params; only step 1
   // (GPU Shepard bake vs CPU 1-cell hue stripes) differs.
   // Preset sweep:
-  //   wash      = infer FULL LUT from palette  — broad extrapolation,
-  //               image structure preserved (lPreserve / cPreserve high), wide
-  //               envelope, heavy smooth blur fills the cube smoothly.
+  //   basic     = subtle palette effect         — image structure mostly
+  //               preserved (lPreserve / cPreserve high), gentle blur.
   //   hard      = close to palette              — snap to palette colors,
   //               lPreserve/cPreserve ≈ 0, tight envelope, near-Voronoi softness.
   // Soft / balanced / vivid step between the two ends.
@@ -4059,7 +4111,6 @@ function init(){
   // all mirror the UI / pipeline order — easier to compare entries by eye.
   const lutPresets = {
     'basic':    { lRange: 0.20, abRange: 0.14, hRange: 0.40, softness: 1.0, hueGate: 1.00, lPreserve: 1.00, cPreserve: 1.00, lExt: 1.00, lEnvFloor: false, lEnvCeil: false, cExt: 0.40, cEnvFloor: false, cEnvCeil: false, smoothness: 4, reach: 0.25, lumaLook: 0.20 },
-    'wash':     { lRange: 0.9,  abRange: 0.30, hRange: 2.50, softness: 1.2, lPreserve: 1.00, cPreserve: 0.80, lExt: 1.00, lEnvFloor: true, lEnvCeil: true, cExt: 0.40, cEnvFloor: false, cEnvCeil: true, smoothness: 6, reach: 0.50, lumaLook: 0.40 },
     'soft':     { lRange: 0.7,  abRange: 0.25, hRange: 1.80, softness: 2.0, lPreserve: 0.80, cPreserve: 0.55, lExt: 0.85, lEnvFloor: true, lEnvCeil: true, cExt: 0.32, cEnvFloor: false, cEnvCeil: true, smoothness: 4, reach: 0.35, lumaLook: 0.30 },
     'balanced': { lRange: 0.5,  abRange: 0.18, hRange: 1.20, softness: 3.5, lPreserve: 0.50, cPreserve: 0.40, lExt: 0.60, lEnvFloor: true, lEnvCeil: true, cExt: 0.22, cEnvFloor: false, cEnvCeil: true, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
     'vivid':    { lRange: 0.35, abRange: 0.10, hRange: 0.70, softness: 5.0, lPreserve: 0.25, cPreserve: 0.20, lExt: 0.40, lEnvFloor: true, lEnvCeil: true, cExt: 0.15, cEnvFloor: false, cEnvCeil: true, smoothness: 2, reach: 0.30, lumaLook: 0.20 },
