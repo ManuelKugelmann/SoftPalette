@@ -1,113 +1,124 @@
-# SoftPalette — repo conventions for Claude
+# SoftPalette — Claude conventions
 
-## Build timestamp — auto-bumped, don't touch by hand
+## Style
 
-The `<meta name="build" content="...">` tag and the `#buildBadge` span in
-`index.html` carry an ISO-8601 UTC timestamp the user reads from the
-header (click-to-copy). It's kept fresh automatically:
+Telegram. Fragments, no preambles, no recap, no apologies. Drop
+articles. Results > narration. Same style in this file.
 
-- `.githooks/pre-commit` runs `scripts/sync-build-timestamp.sh` and
-  re-stages `index.html` so every commit lands with the current time.
-- `.github/workflows/sync-build-timestamp.yml` is the server-side
-  fallback — if a push arrives with an older timestamp, the workflow
-  rewrites and pushes a `[skip build-timestamp]` follow-up.
+## Build timestamp
 
-Don't edit the two literals manually; the hook overwrites them anyway.
-If the local hook isn't installed, run `git config core.hooksPath .githooks`
-once in the worktree.
+Auto-bumped by `.githooks/pre-commit` (`scripts/sync-build-timestamp.sh`)
++ server fallback `.github/workflows/sync-build-timestamp.yml`. Don't
+edit literals. Install hook: `git config core.hooksPath .githooks`.
 
 ## Branch + push
 
-Work happens on `claude/extend-256-color-palette-b6Lmh`. Push with
-`git push -u origin <branch>`; the `PostToolUse` hook in
-`~/.claude/settings.json` emits a `githack` URL message after push.
+`claude/extend-256-color-palette-b6Lmh`. `git push -u origin <branch>`.
+`PostToolUse` hook emits `githack` URL after push.
 
-## Algorithm-level notes
+## Algorithm
 
-The LUT pipeline is a soft 3D Voronoi in OkLab. Two build methods
-share the post-build pipeline — only step 1 differs.
+Soft 3D Voronoi LUT in OkLab. Two build methods, shared post-build.
 
-**Terminology:** "LUT texel" = one texel of the N³ output LUT cube,
-addressed by its (L, a, b) coordinate. "anchor" = a palette seed.
-Voronoi cells (the regions of LUT texels that adopt a given anchor)
-are implicit — never materialized; they emerge from per-texel IDW or
-nearest-hue selection.
+**Terms.** "LUT texel" = N³ cube cell at (L, a, b). "anchor" = palette
+seed. Voronoi cells implicit. OkLab: Luma=`lab.x`, Chroma=`length(lab.yz)`,
+Hue=`atan2(lab.z, lab.y)`. Chroma absolute, not Saturation.
 
-**Color terms:** SoftPalette works in OkLab. Luma = `lab.x`, Chroma =
-`length(lab.yz)`, Hue = `atan2(lab.z, lab.y)`. Chroma is absolute
-colorfulness (not Saturation, which is Chroma relative to Luma — we
-don't use Saturation anywhere).
+**Sliders.**
+- `lRange` / `abRange` — anisotropic distance weights (σL / σab in IDW;
+  nearest-seed weights in Stripes 1a). UI [0.25, 1].
+- `hRange` — IDW Gaussian Hue gate σ (rad); Stripes restamp band radius.
+  UI [0.25, 1].
+- `softness` — IDW Shepard power; Stripes 1b iters via
+  `round(10/s)`. UI [1, 10].
+- `lPreserve` / `cPreserve` — texel→identity blend in `FS_LUT_BUILD`,
+  coherence-gated. 0=snap, 1=passthrough. **IDW only.**
+- Envelope = dual-thumb floor/ceil **extension** per channel:
+  `lExtLo`/`lExtHi` (luma, [0,1]) + `cExtLo`/`cExtHi` (chroma, [0,1]
+  fraction × `LUT_AB_RANGE`). Each EXTENDS the per-hue curve bound
+  outward on its side; at max that side is a noop (= old toggle off).
+  No floor/ceil checkboxes anymore.
 
-**Slider names** (and their roles per method):
-- `lRange` / `abRange` — anisotropic distance weights (Luma axis,
-  (a, b) axes). IDW: σL / σab in the Shepard IDW distance metric.
-  Stripes: weights for nearest-seed selection in step 1a.
-- `hRange` — IDW: Gaussian Hue gate width. Stripes: restamp Hue band
-  width in step 1b.
-- `softness` — IDW: Shepard power exponent. Stripes: drives step-1b
-  iter count via `stripeItersFromSoftness(softness) = round(10 / softness)`.
-  Single unified slider; no separate `stripeIters` param.
-- `lPreserve` / `cPreserve` (UI "luma preserve" / "chroma preserve")
-  — texel→identity-LUT blend (Luma / Chroma magnitude). Applied
-  inside `FS_LUT_BUILD` with anchor-coherence gate. 0 = snap to
-  anchor's Luma/Chroma; 1 = passthrough identity (image Luma/Chroma
-  preserved). IDW only — Stripes' step 1 does not consult these.
+### Step 1 (IDW) — `FS_LUT_BUILD`, per texel per L-slice
 
-### Step 1 (IDW) — `FS_LUT_BUILD`, per LUT texel per Luma slice
+Single dispatch, **MRT** two outputs (the IDW loop runs once):
+`o0` = step-1 core, `o1` = step-2 (preserve+envelope). The `gate`
+scalar (1e) is computed once and applied to both.
 
-1a. IDW Pass 1: track `d_min²` (anisotropic, weighted by `lRange` /
-    `abRange`) + `d_min²` (isotropic) and record the nearest anchor's
-    Luma and Chroma
-1b. IDW Pass 2: Shepard IDW on the ratio `d² / d_min²` with a Gaussian
-    Hue gate against the LUT texel's own (a, b) direction, gate width
-    set by `hRange`; accumulates weighted Lab and weighted Chroma
-1c. Chroma-preserving rescale, coherence-modulated — counters Chroma
-    cancellation when opposing-Hue anchors blend toward grey
-1d. `cPreserve` mix toward the texel's identity Chroma, gated by anchor
-    coherence (low coherence → don't push noisy direction up to
-    identity magnitude)
-1e. `lPreserve` mix toward the texel's identity Luma (ungated)
-1f. Envelope clamp — per-channel Luma/Chroma clamp from the
-    Hue-interpolated `(L_lo, L_hi, C_lo, C_hi)` curve, with soft-min/max
-    transition outside the band
+- 1a. Pass 1: nearest-anchor anisotropic + isotropic `d_min²`; record
+  nearest Luma/Chroma.
+- 1b. Pass 2: Shepard IDW on `d²/d_min²` w/ Gaussian Hue gate vs.
+  texel's own (a,b); accumulate weighted Lab + Chroma.
+- 1c. Chroma-preserving rescale → `target`, coherence-modulated.
+- gate. Safety net scalar `hueGate × chromaTrust × lumaTrust` (kills
+  opposing-Hue, fades near-grey + Luma extremes).
+- **o0 / step 1** = `lab.x` (IDW luma), `yz = dir·target·gate`. No
+  preserve, no envelope.
+- **o1 / step 2** = 1d `cPreserve` mix→identity Chroma (`finalMag`),
+  `yz = dir·finalMag·gate`; 1f `lPreserve` mix→identity Luma; 1g
+  envelope clamp (`lExtLo/Hi`, `cExtLo/Hi`) w/ soft skirts.
 
-### Step 1 (Stripes) — `stripes_buildLut`, CPU
+Captured intermediates feed the inline stage previews: `lutTexStep1`
+(o0), `lutTexStep2` (o1 snapshot, top of `applyLateStages`), and the
+final `lutTex` (step 3). Stripes has no preserve/envelope → step1 ==
+step2 (it copies its build into `lutTexStep1`). A late L-only re-clamp
+(`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`) runs after luma-look when
+`debugEnvelope` is on, using the same `lExtLo/Hi`.
 
-1a. Voronoi-rotate every LUT texel to its nearest seed's Hue, where
-    "nearest" is anisotropic Lab distance weighted by `lRange` /
-    `abRange` (same metric as IDW). Cell keeps its own Luma and Chroma
-    magnitude (raw "stripes" cube).
-1b. Iterate `stripeIters` × { 3D blur the whole cube (CPU
-    `stripes_blur3D`, plain Cartesian), then restamp only texels whose
-    Hue lies within `hRange` of a seed }
-1c. Pin the LUT texel at each anchor's (L, a, b) to the anchor's exact value
+### Step 1 (Stripes) — `stripes_buildLut` (CPU) / `stripes_buildLutGpu` (opt-in)
 
-Stripes' step 1 does not consult `cPreserve` / `lPreserve` / envelope
-clamp. Stripes currently has no texel→identity blend — the slider
-values are ignored on this path (open question whether to wire them in).
+- 1a. Voronoi-rotate texel→nearest seed Hue (same anisotropic Lab
+  metric); keep own Luma+|C|.
+- 1b. Iterate `stripeIters` × { plain 3D blur, restamp texels w/in
+  `hRange` of a seed Hue }.
+- 1c. Pin each anchor texel to exact (L, a, b).
+
+GPU port: `state.params.stripesGpu` toggle (default off), shaders
+`FS_LUT_STRIPES_SEED` + `FS_LUT_GAUSS` + `FS_LUT_STRIPES_RESTAMP`. CPU
+kept for A/B. Stripes 1 ignores `cPreserve`/`lPreserve`/envelope.
 
 ### Shared late stages — `applyLateStages`
 
-2. Anchor stamp (overwrite the LUT texel nearest each anchor with the
-   anchor's exact value)
-3. Blur loop × `smoothness` iters — each iter = 3 separable axis blurs
-   + anchor restamp. The blur shader (`FS_LUT_BLUR`) applies the
-   chroma-preserving rescale (Cartesian sum + scalar Chroma mean,
-   rescale toward Cavg modulated by coherence) but does NOT re-apply
-   `cPreserve` / `lPreserve` — those are build-stage only.
-4. Final anchor stamp
-5. Reach desaturation (`applyReachPass`) — Chroma falloff with distance
-   from any anchor
-6. Luma-look rotation (`applyLumaLookPass`, UI "luma look") — rotates
-   `arg(yz)` toward the Luma→Hue curve. Operates on the cached
-   pre-luma-look LUT (`state.lutTexRaw`), so moving only the `lumaLook`
-   slider re-runs this single pass with no full rebuild
+2. Anchor stamp.
+3. Blur × `smoothness` iters (3 axes + restamp). `FS_LUT_BLUR`:
+   chroma-preserving rescale + hue safety net; no
+   `cPreserve`/`lPreserve` (build-stage only). `uBlurStrength` tapers
+   1.0→0.3 across iters (also `FS_LUT_GAUSS`).
+4. Final anchor stamp.
+5. Reach desaturation (`applyReachPass`) — Chroma falloff vs.
+   anchor distance.
+6. Luma-look (`applyLumaLookPass`) — rotates `arg(yz)` toward Luma→Hue
+   curve. Reads cached `state.lutTexRaw`; moving only `lumaLook`
+   reruns just this pass.
 
-The per-texel late stages (reach, luma look, luma order) touch disjoint
-axes — `|yz|`, `arg(yz)`, `lab.x` — so reordering within that group is
-safe. Only the build/blur/stamp sequence is order-sensitive.
+## Static checks — `scripts/check.mjs`
 
-CPU `idwLab()` (defined at index.html:1207) is currently unused — kept
-as a reference but not called from the preview path. `rawIdwLab()` is
-the actual IDW hue preview; `rawStripesLab()` is the Stripes hue
-preview (mirrors step 1a of `stripes_buildLut`).
+Dep-free Node. Checks inline-`<script>` syntax, `images/<file>` refs,
+`data-preset` ↔ `PRESETS` keys, `bindImageBtn` wiring. Pre-commit hook
+runs + blocks on fail.
+
+## Headless runtime testing — Chrome + SwiftShader
+
+SwiftShader here exposes `EXT_color_buffer_float` → LUT pipeline runs
+end-to-end. Run GPU code yourself before declaring done.
+
+```powershell
+$chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+& $chrome --headless=new --enable-unsafe-swiftshader `
+  --use-angle=swiftshader --no-sandbox `
+  --enable-logging=stderr --virtual-time-budget=10000 `
+  --dump-dom file:///C:/Projects/SoftPalette/index.html `
+  > $env:TEMP\dom.html 2> $env:TEMP\err.txt
+# read #lutStatus from dom.html; grep err.txt for shader-compile/Uncaught/TypeError.
+```
+
+`#lutStatus` set by `updateLutStatus()`. Empty=init crashed. Clean:
+`built in <N>ms · neighbours ΔE avg ≈0.02 · anchor self ΔE max 0.000`.
+`anchor self ΔE > 0` = `stampAnchors` FBO regression. `GPU stall …
+ReadPixels` warnings benign.
+
+**A/B**: `Get-Content -Raw -replace` index.html → temp file w/ flipped
+`state.params` default, run, delete. ΔE within ~0.001 = paths agree.
+
+**Per-pixel/canvas shaders** invisible to `#lutStatus`. Use
+`--screenshot=path.png --window-size=W,H` or inject JS.

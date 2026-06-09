@@ -1,0 +1,25 @@
+<!doctype html><html><head><title>WebGL2 probe</title></head><body>
+<canvas id=c width=8 height=8></canvas>
+<pre id=out>pending</pre>
+<script>
+const c = document.getElementById('c');
+const out = document.getElementById('out');
+try {
+  const gl = c.getContext('webgl2');
+  if (!gl) { out.textContent='RESULT no-webgl2'; }
+  else {
+    const ext = gl.getExtension('EXT_color_buffer_float');
+    const exts = gl.getSupportedExtensions().join(',');
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+    const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    out.textContent =
+      'RESULT EXT_color_buffer_float=' + !!ext +
+      '\nVERSION=' + gl.getParameter(gl.VERSION) +
+      '\nSHADING_LANGUAGE_VERSION=' + gl.getParameter(gl.SHADING_LANGUAGE_VERSION) +
+      '\nVENDOR=' + vendor +
+      '\nRENDERER=' + renderer +
+      '\nALL_EXT=\n' + exts.split(',').join('\n');
+  }
+} catch (e) { out.textContent = 'RESULT exception ' + e.message; }
+</script></body></html>

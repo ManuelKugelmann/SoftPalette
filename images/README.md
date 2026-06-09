@@ -6,6 +6,7 @@ following files in here so the buttons work:
 | File                  | Tab button   | Status | Source / notes |
 | --------------------- | ------------ | ------ | -------------- |
 | `portrait.jpg`        | portrait     | ✓ in repo | Gonzalo Bazgan at Wikiconference 2026 (© Ezarate) — Wikimedia Commons, CC-BY 4.0. Modern male portrait; plain navy tee, soft colourful painterly backdrop, no brand merch. |
+| `classic.png`         | classic      | ✓ in repo | Kodak suite (https://r0k.us/graphics/kodak/) — kodim04 (woman in red hat). Rights-clean classic test portrait; the field's Lenna alternative. |
 | `kodim13.png`         | nature       | ✓ in repo | Kodak suite (https://r0k.us/graphics/kodak/) — kodim13 (alpine stream) |
 | `kodim23.png`         | parrots      | ✓ in repo | Kodak suite — kodim23 (vivid macaws) |
 | `groupshot.jpg`       | colorful     | ✓ in repo | Lathmar Holi 2022 in Nandgaon, Uttar Pradesh — Wikimedia Commons (featured picture). Festival crowd with vivid color powders — strong chroma + full hue circle, hard LUT test. Sits next to parrots as the colorful example. |

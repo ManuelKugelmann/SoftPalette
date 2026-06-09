@@ -13,3 +13,11 @@ fi
 if ! git diff --quiet -- index.html; then
   git add index.html
 fi
+# 3. Static sanity checks (inline-script syntax, image refs, preset/loader
+#    wiring, conflict markers). Blocks the commit on failure. Skipped when node
+#    is unavailable so the hook never hard-fails for that reason alone.
+if command -v node >/dev/null 2>&1; then
+  node "$repo/scripts/check.mjs"
+else
+  echo "pre-commit: node not found — skipping static checks" >&2
+fi
