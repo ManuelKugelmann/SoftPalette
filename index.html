@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-09T06:12:26Z">
+<meta name="build" content="2026-06-09T06:18:27Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -234,7 +234,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-09T06:12:26Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-09T06:18:27Z</span>
   </div>
 </header>
 
@@ -452,7 +452,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugStamps"   checked style="margin:0">anchor stamps</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugBlur"     checked style="margin:0">blur</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="debugLumaLook" checked style="margin:0">luma look</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Stripes method only: build the LUT on the GPU (same algorithm) instead of the CPU. Toggle to A/B compare."><input type="checkbox" id="stripesGpu" style="margin:0">stripes gpu</label>
       </div>
     </div>
     <div class="note" id="lutStatus" style="margin-top:6px"></div>
@@ -607,8 +606,8 @@ const state = {
 
     // LUT cube edge length (odd, in LUT_SIZES). Default 33³ — production-standard.
     lutSize: 33,
-    // LUT build method: 'idw' = GPU Shepard IDW bake; 'stripes' = CPU
-    // hue-Voronoi stripes + global L/C clamps + smooth chroma envelope.
+    // LUT build method: 'idw' = GPU Shepard IDW bake; 'stripes' = GPU
+    // hue-Voronoi stripes + iterated blur.
     lutMethod: 'idw',
 
     // Build params (IDW: anisotropic distance metric + Gaussian Hue gate +
@@ -659,9 +658,6 @@ const state = {
     debugStamps:      true,
     debugBlur:        true,
     debugLumaLook:    true,
-    // Opt-in GPU build for the Stripes method (else CPU). Same algorithm; kept
-    // side-by-side for A/B comparison. Not a preset param.
-    stripesGpu:       false,
 
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
@@ -1606,56 +1602,6 @@ function stripes_stampLut(L_cell, C_cell, seed_h, seed_L, seed_C, seedCMin, seed
   const C_out = seed_C_c + cR * (C_clamped - seed_C_c);
   return [L_out, C_out * Math.cos(seed_h), C_out * Math.sin(seed_h)];
 }
-// Separable 3D blur: 5-tap Gaussian (1,4,6,4,1)/16 on a, b axes;
-// 3-tap (s, 1-2s, s) on L axis with s = wL/4 (skip when wL ≈ 0).
-function stripes_blur3D(data, scratch, N, wL){
-  if (wL === undefined) wL = 0.3;
-  // a axis
-  for (let li=0; li<N; li++) for (let bi=0; bi<N; bi++){
-    for (let ai=0; ai<N; ai++){
-      const am2 = Math.max(0, ai-2), am1 = Math.max(0, ai-1);
-      const ap1 = Math.min(N-1, ai+1), ap2 = Math.min(N-1, ai+2);
-      const i = ((li*N + bi)*N + ai)*3;
-      const im2 = ((li*N + bi)*N + am2)*3, im1 = ((li*N + bi)*N + am1)*3;
-      const ip1 = ((li*N + bi)*N + ap1)*3, ip2 = ((li*N + bi)*N + ap2)*3;
-      scratch[i  ] = (data[im2  ] + 4*data[im1  ] + 6*data[i  ] + 4*data[ip1  ] + data[ip2  ]) * (1/16);
-      scratch[i+1] = (data[im2+1] + 4*data[im1+1] + 6*data[i+1] + 4*data[ip1+1] + data[ip2+1]) * (1/16);
-      scratch[i+2] = (data[im2+2] + 4*data[im1+2] + 6*data[i+2] + 4*data[ip1+2] + data[ip2+2]) * (1/16);
-    }
-  }
-  // b axis
-  for (let li=0; li<N; li++){
-    for (let bi=0; bi<N; bi++){
-      const bm2 = Math.max(0, bi-2), bm1 = Math.max(0, bi-1);
-      const bp1 = Math.min(N-1, bi+1), bp2 = Math.min(N-1, bi+2);
-      for (let ai=0; ai<N; ai++){
-        const i = ((li*N + bi)*N + ai)*3;
-        const im2 = ((li*N + bm2)*N + ai)*3, im1 = ((li*N + bm1)*N + ai)*3;
-        const ip1 = ((li*N + bp1)*N + ai)*3, ip2 = ((li*N + bp2)*N + ai)*3;
-        data[i  ] = (scratch[im2  ] + 4*scratch[im1  ] + 6*scratch[i  ] + 4*scratch[ip1  ] + scratch[ip2  ]) * (1/16);
-        data[i+1] = (scratch[im2+1] + 4*scratch[im1+1] + 6*scratch[i+1] + 4*scratch[ip1+1] + scratch[ip2+1]) * (1/16);
-        data[i+2] = (scratch[im2+2] + 4*scratch[im1+2] + 6*scratch[i+2] + 4*scratch[ip1+2] + scratch[ip2+2]) * (1/16);
-      }
-    }
-  }
-  // L axis (skip if wL very small)
-  if (wL <= 1e-4) return;
-  const sideW = wL * 0.25, ctrW = 1 - 2*sideW;
-  for (let li=0; li<N; li++){
-    const lm = Math.max(0, li-1), lp = Math.min(N-1, li+1);
-    for (let bi=0; bi<N; bi++) for (let ai=0; ai<N; ai++){
-      const i  = ((li*N + bi)*N + ai)*3;
-      const im = ((lm*N + bi)*N + ai)*3;
-      const ip = ((lp*N + bi)*N + ai)*3;
-      scratch[i  ] = sideW * data[im  ] + ctrW * data[i  ] + sideW * data[ip  ];
-      scratch[i+1] = sideW * data[im+1] + ctrW * data[i+1] + sideW * data[ip+1];
-      scratch[i+2] = sideW * data[im+2] + ctrW * data[i+2] + sideW * data[ip+2];
-    }
-  }
-  data.set(scratch);
-}
-// Main-style LUT builder. Returns Float32Array length N×N×N×3 (Lab per cell,
-// z-major: ((li*N+bi)*N+ai)*3).
 // Unified softness slider drives both IDW power exponent (state.params.softness)
 // and Stripes step-1b iter count. Mapping: stripeIters = round(10 / softness).
 // Hard end (softness 12) → 1 iter; soft end (softness 1) → 10 iters.
@@ -1663,155 +1609,11 @@ function stripeItersFromSoftness(softness){
   return Math.max(0, Math.round(10 / Math.max(softness, 0.1)));
 }
 
-function stripes_buildLut(N){
-  const p = state.params;
-  const palSeeds = paletteSeeds().filter(s => !s.synthetic).map(s => ({
-    L: s.L, a: s.a, b: s.b, h: Math.atan2(s.b, s.a),
-    C: Math.hypot(s.a, s.b), synthetic: false,
-  }));
-  if (palSeeds.length === 0) return null;
-  const seeds = palSeeds;
-
-  // Step 1, mirroring the main branch's algorithm:
-  //   1a. Voronoi-fill EVERY cell — each cell adopts its nearest seed's
-  //       hue (nearest = anisotropic Lab distance weighted by lRange,
-  //       abRange — same metric as IDW). Cell keeps its own L and
-  //       chroma magnitude. Result: a fully colored cube whose hue
-  //       snaps in wedges to the palette.
-  //   1b. Iterate stripeIters times: 3D blur the whole cube, then
-  //       RESTAMP only cells whose input hue lies within hRange of a
-  //       seed (the narrow "stripes"). The blur softens edges between
-  //       hue regions while the restamp keeps each seed-hue stripe
-  //       locked. iters=0 leaves the raw Voronoi-rotation visible.
-  // Shared late stages (anchor stamp → smoothness blur+restamp →
-  // reach → luma look) are applied identically to both methods.
-  const cellL  = idx => idx / (N - 1);
-  const cellAB = idx => -LUT_AB_RANGE + (idx / (N - 1)) * (2 * LUT_AB_RANGE);
-
-  const data    = new Float32Array(N*N*N*3);
-  const scratch = new Float32Array(N*N*N*3);
-
-  // hueDist on [0, π].
-  const hueDist = (h1, h2) => {
-    let d = h1 - h2;
-    while (d >  Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
-    return Math.abs(d);
-  };
-
-  // Anisotropic Lab distance for seed selection — matches IDW's metric
-  // so the lRange / abRange sliders control Stripes anchor reach the
-  // same way they do for IDW.
-  const invSL2 = 1.0 / (Math.max(p.lRange,  1e-6) ** 2);
-  const invSA2 = 1.0 / (Math.max(p.abRange, 1e-6) ** 2);
-
-  // Texel→identity blend. Each stamp interpolates between the winning
-  // seed's (Luma, Chroma magnitude) and the cell's own (Luma, |C|),
-  // adopting the seed's Hue direction. lPreserve / cPreserve = 1 keeps
-  // the cell's structure (legacy Stripes behavior); = 0 snaps to the
-  // seed's Luma/Chroma. Matches IDW's preserve semantics, just without
-  // the IDW coherence gate (Stripes doesn't have a natural per-texel
-  // coherence — each cell adopts exactly one seed).
-  const lPres = p.lPreserve;
-  const cPres = p.cPreserve;
-
-  // Step 1a — Voronoi-rotate every cell to its nearest seed (anisotropic
-  // Lab distance) and apply the lPreserve / cPreserve blend.
-  for (let li = 0; li < N; li++){
-    const Lc = cellL(li);
-    for (let bi = 0; bi < N; bi++){
-      const bv = cellAB(bi);
-      for (let ai = 0; ai < N; ai++){
-        const av = cellAB(ai);
-        const Cc = Math.hypot(av, bv);
-        let bestK = 0;
-        let bestD = (Lc - seeds[0].L)*(Lc - seeds[0].L)*invSL2
-                  + (av  - seeds[0].a)*(av  - seeds[0].a)*invSA2
-                  + (bv  - seeds[0].b)*(bv  - seeds[0].b)*invSA2;
-        for (let k = 1; k < seeds.length; k++){
-          const dL = Lc - seeds[k].L;
-          const dA = av - seeds[k].a;
-          const dB = bv - seeds[k].b;
-          const d  = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-          if (d < bestD){ bestD = d; bestK = k; }
-        }
-        const s = seeds[bestK];
-        const Lout = s.L + lPres * (Lc - s.L);
-        const Cout = s.C + cPres * (Cc - s.C);
-        const idx = ((li*N + bi)*N + ai)*3;
-        data[idx]   = Lout;
-        data[idx+1] = Cout * Math.cos(s.h);
-        data[idx+2] = Cout * Math.sin(s.h);
-      }
-    }
-  }
-
-  // Step 1b — N iterations of (blur whole cube + restamp narrow stripes).
-  const iters = stripeItersFromSoftness(p.softness);
-  const stripeRad = Math.max(0.01, p.hRange || 0.3);
-  for (let it = 0; it < iters; it++){
-    stripes_blur3D(data, scratch, N, 0.3);
-    for (let li = 0; li < N; li++){
-      const Lc = cellL(li);
-      for (let bi = 0; bi < N; bi++){
-        const bv = cellAB(bi);
-        for (let ai = 0; ai < N; ai++){
-          const av = cellAB(ai);
-          const hc = Math.atan2(bv, av);
-          let bestS = null, bestD = stripeRad;
-          for (const s of seeds){
-            const d = hueDist(hc, s.h);
-            if (d < bestD){ bestD = d; bestS = s; }
-          }
-          if (bestS === null) continue;
-          const Cc = Math.hypot(av, bv);
-          const Lout = bestS.L + lPres * (Lc - bestS.L);
-          const Cout = bestS.C + cPres * (Cc - bestS.C);
-          const idx = ((li*N + bi)*N + ai)*3;
-          data[idx]   = Lout;
-          data[idx+1] = Cout * Math.cos(bestS.h);
-          data[idx+2] = Cout * Math.sin(bestS.h);
-        }
-      }
-    }
-  }
-
-  // Pin exact anchor cells before handing off to the shared late stages.
-  for (const s of seeds){
-    const li = Math.round(s.L * (N - 1));
-    const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-    const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-    if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
-    const idx = ((li*N + bi)*N + ai)*3;
-    data[idx] = s.L; data[idx+1] = s.a; data[idx+2] = s.b;
-  }
-  return data;
-}
-// Upload CPU-built Lab cells to state.lutTex. Lab → texel as RGBA Float32
-// (alpha = 1.0 ignored). Layout matches WebGL2 3D texture pixel order:
-// z = L slice (depth), y = b row (height), x = a col (width).
-function stripes_uploadLut(data, N){
-  const gl = state.gl;
-  const rgba = new Float32Array(N*N*N*4);
-  for (let i = 0, j = 0; i < N*N*N; i++, j += 3){
-    const o = i*4;
-    rgba[o]   = data[j];
-    rgba[o+1] = data[j+1];
-    rgba[o+2] = data[j+2];
-    rgba[o+3] = 1.0;
-  }
-  // Upload to lutTex so the shared late-stage pipeline (stamp → smoothness
-  // blur → reach → lumalook) treats this exactly like an IDW bake.
-  gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
-  gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, N, N, N, gl.RGBA, gl.FLOAT, rgba);
-}
-
-// GPU equivalent of stripes_buildLut (opt-in via params.stripesGpu). Same
-// algorithm, same params, same real-seeds-only build — just on the GPU's
-// per-L-slice machinery instead of CPU loops. Renders step 1a into state.lutTex,
-// then iterates {3 separable Gaussian blur passes + hue restamp}, ping-ponging
-// lutTex / lutTex2, and leaves the result in state.lutTex. Step 1c (anchor pin)
-// is done by the caller via stampAnchors, like the IDW path's late stages.
+// Stripes step 1 — real-seeds-only build on the GPU's per-L-slice machinery.
+// Renders step 1a into state.lutTex, then iterates {3 separable Gaussian blur
+// passes + hue restamp}, ping-ponging lutTex / lutTex2, and leaves the result
+// in state.lutTex. Step 1c (anchor pin) is done by the caller via stampAnchors,
+// like the IDW path's late stages.
 function stripes_buildLutGpu(N, palNReal){
   const gl = state.gl;
   const p  = state.params;
@@ -2178,15 +1980,11 @@ function recomputeLut(){
   // shared late-stage pipeline below (anchor stamp → smoothness blur+stamp
   // loop → reach → lumalook) is identical.
   if (state.params.lutMethod === 'stripes'){
-    // GPU path is opt-in (params.stripesGpu) — same algorithm as the CPU
-    // stripes_buildLut, kept side-by-side for comparison. Both use real
-    // (non-synthetic) seeds only; real seeds occupy the front of seedTex.
-    if (state.params.stripesGpu && realSeeds.length > 0){
+    // Stripes builds on the GPU from real (non-synthetic) seeds only; real
+    // seeds occupy the front of seedTex.
+    if (realSeeds.length > 0){
       stripes_buildLutGpu(N, Math.min(realSeeds.length, MAX_PAL));
       stampAnchors(state.lutTex, N, realSeeds);   // step 1c — pin exact anchors
-    } else {
-      const data = stripes_buildLut(N);
-      if (data) stripes_uploadLut(data, N);
     }
     // Ensure the FBO is bound for the late-stage GPU passes that follow.
     if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
@@ -2731,16 +2529,16 @@ void main(){
 }`;
 
 // ============================================================
-// STRIPES — GPU port (opt-in via params.stripesGpu). Reproduces the CPU
-// stripes_buildLut algorithm exactly, on the same seedTex / FBO / per-L-slice
-// machinery as the IDW build. Uses ONLY real (non-synthetic) seeds: the caller
-// sets uPalN = realCount and real seeds occupy the front of uSeeds.
+// STRIPES — GPU build (hue-Voronoi + iterated blur), on the same seedTex / FBO
+// / per-L-slice machinery as the IDW build. Uses ONLY real (non-synthetic)
+// seeds: the caller sets uPalN = realCount and real seeds occupy the front of
+// uSeeds.
 // ============================================================
 
 // Step 1a — Voronoi seed fill. Each texel adopts its NEAREST seed's hue
 // (nearest = anisotropic Lab distance weighted by lRange / abRange, the same
 // metric IDW uses), keeping a lPreserve/cPreserve blend of its own Luma and
-// Chroma magnitude. Mirrors stripes_buildLut step 1a.
+// Chroma magnitude. Stripes step 1a.
 const FS_LUT_STRIPES_SEED = `#version 300 es
 precision highp float;
 out vec4 fragColor;
@@ -2777,7 +2575,7 @@ void main(){
   fragColor = vec4(Lout, Cout * cos(bH), Cout * sin(bH), 1.0);
 }`;
 
-// Step 1b blur — plain separable Gaussian, matching CPU stripes_blur3D:
+// Step 1b blur — plain separable Gaussian:
 // 5-tap (1,4,6,4,1)/16 on the a / b axes; 3-tap (0.075, 0.85, 0.075) on the
 // L axis (wL = 0.3). NO chroma-preserving rescale (that is the late-stage
 // FS_LUT_BLUR's job) — Stripes' 1b blur is a literal Lab average. Centered
@@ -2820,7 +2618,7 @@ void main(){
 // (from the texel's own a/b, not the blurred value) lies within uHRange of a
 // seed hue. Those snap back to the nearest-hue seed (lPreserve/cPreserve blend
 // using the texel's own Luma + Chroma magnitude); all others pass the blurred
-// value through. Mirrors stripes_buildLut step 1b restamp.
+// value through. Stripes step 1b restamp.
 const FS_LUT_STRIPES_RESTAMP = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -4239,14 +4037,6 @@ function init(){
   bindEnvToggle('debugStamps',   'debugStamps');
   bindEnvToggle('debugBlur',     'debugBlur');
   bindEnvToggle('debugLumaLook', 'debugLumaLook');
-  // Stripes GPU/CPU toggle — rebuild on change but DON'T clear the active
-  // preset (it's a build-engine choice, not an algorithm param).
-  (() => {
-    const el = document.getElementById('stripesGpu');
-    if (!el) return;
-    el.checked = state.params.stripesGpu;
-    el.addEventListener('change', () => { state.params.stripesGpu = el.checked; scheduleLutRebuild(); });
-  })();
 
   // LUT-slice L picker (diagnostic) — re-renders the slice preview only.
   (function bindLutSliceL(){

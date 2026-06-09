@@ -65,17 +65,17 @@ step2 (it copies its build into `lutTexStep1`). A late L-only re-clamp
 (`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`) runs after luma-look when
 `debugEnvelope` is on, using the same `lExtLo/Hi`.
 
-### Step 1 (Stripes) — `stripes_buildLut` (CPU) / `stripes_buildLutGpu` (opt-in)
+### Step 1 (Stripes) — `stripes_buildLutGpu` (GPU, real seeds only)
 
 - 1a. Voronoi-rotate texel→nearest seed Hue (same anisotropic Lab
   metric); keep own Luma+|C|.
-- 1b. Iterate `stripeIters` × { plain 3D blur, restamp texels w/in
-  `hRange` of a seed Hue }.
+- 1b. Iterate `stripeIters` (`stripeItersFromSoftness`) × { plain 3D
+  blur, restamp texels w/in `hRange` of a seed Hue }.
 - 1c. Pin each anchor texel to exact (L, a, b).
 
-GPU port: `state.params.stripesGpu` toggle (default off), shaders
-`FS_LUT_STRIPES_SEED` + `FS_LUT_GAUSS` + `FS_LUT_STRIPES_RESTAMP`. CPU
-kept for A/B. Stripes 1 ignores `cPreserve`/`lPreserve`/envelope.
+Shaders `FS_LUT_STRIPES_SEED` + `FS_LUT_GAUSS` + `FS_LUT_STRIPES_RESTAMP`.
+The CPU builder + GPU/CPU toggle were retired — GPU is the only path.
+Stripes 1 ignores `cPreserve`/`lPreserve`/envelope (so step1 == step2).
 
 ### Shared late stages — `applyLateStages`
 
