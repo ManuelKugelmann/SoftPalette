@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-10T20:32:02Z">
+<meta name="build" content="2026-06-10T20:42:19Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-10T20:32:02Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-10T20:42:19Z</span>
   </div>
 </header>
 
@@ -1421,6 +1421,11 @@ function computeHueLCCurve(seeds){
     if (a.L > gHi) gHi = a.L;
     if (a.C > gCHi) gCHi = a.C;
   }
+  // If the palette has NO desaturated / b&w anchor (everything is colourful),
+  // there's no grey reference pinning the brightness range, so let the hues
+  // span the full L axis (dark + bright versions reach 0 and 1). A desaturated
+  // anchor reinstates anchor-governed floor/ceil.
+  const hasDesat = A.some(a => a.C < 0.04);
   const sigma       = Math.PI / 4;
   const inv2s2      = 1 / (2 * sigma * sigma);
   const beta        = 4;
@@ -1458,8 +1463,8 @@ function computeHueLCCurve(seeds){
       if (a.L > lHi) lHi = a.L;
       if (d <= tightRadius && a.C > cHi) cHi = a.C;
     }
-    buf[i*4+0] = Math.max(0, lLo);
-    buf[i*4+1] = Math.min(1, lHi);
+    buf[i*4+0] = hasDesat ? Math.max(0, lLo) : 0.0;
+    buf[i*4+1] = hasDesat ? Math.min(1, lHi) : 1.0;
     buf[i*4+2] = 0;
     buf[i*4+3] = cHi;
   }
@@ -2768,7 +2773,7 @@ void main(){
   float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
   float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
   float bestD = 1e30;
-  float bH = 0.0;
+  float bL = 0.0, bC = 0.0, bH = 0.0;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
@@ -2777,14 +2782,13 @@ void main(){
     // nearer-in-Luma grey one, keeping colour at extreme L.
     float dL = L - s.x, dA = a - s.y, dB = b - s.z;
     float d  = dL*dL*invSL2*0.35 + dA*dA*invSA2 + dB*dB*invSA2;
-    if (d < bestD){ bestD = d; bH = atan(s.z, s.y); }
+    if (d < bestD){ bestD = d; bL = s.x; bC = length(s.yz); bH = atan(s.z, s.y); }
   }
   // Cell keeps its own Luma + |Chroma|; only the hue direction is rotated to
-  // the winning seed. Snapping L / |C| to the seed (the old code) made every
-  // Voronoi region a constant-Luma block — the source of the fern-like
-  // L-direction artifact since each L-slice's Voronoi was independent.
-  float cellC = length(vec2(a, b));
-  fragColor = vec4(L, cellC * cos(bH), cellC * sin(bH), 1.0);
+  // Snap to the seed's Luma + Chroma + hue (preserve-neutral). Step 1 carries
+  // NO input-luma variance — flat per Voronoi region; the cell's own Luma and
+  // Chroma are reintroduced in step 2 via lPreserve / cPreserve (matching IDW).
+  fragColor = vec4(bL, bC * cos(bH), bC * sin(bH), 1.0);
 }`;
 
 // Step 1b blur — plain separable Gaussian:
