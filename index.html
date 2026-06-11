@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-10T20:43:16Z">
+<meta name="build" content="2026-06-11T06:53:26Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-10T20:43:16Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-11T06:53:26Z</span>
   </div>
 </header>
 
@@ -336,10 +336,6 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <aside class="right">
   <section class="card">
     <h2>lut parameters</h2>
-    <div class="slider" style="margin-bottom:6px">
-      <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
-      <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
-    </div>
     <div class="row full compact" style="margin-bottom:6px;display:flex;gap:4px">
       <button data-lutmethod="idw" id="lutMethodIdw" class="tab" style="flex:1" title="Soft 3D Voronoi in OkLab via Shepard IDW + hue-curve envelope">IDW</button>
       <button data-lutmethod="stripes" id="lutMethodStripes" class="tab" style="flex:1" title="Hue-Voronoi stripes + global L/C clamps + smooth chroma envelope">Stripes</button>
@@ -355,6 +351,27 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button id="copyPreset"   style="flex:1" title="Copy current params to clipboard as a JSON preset">copy preset</button>
       <button id="loadPreset"   style="flex:1" title="Paste a previously-copied JSON preset (or any subset of params) to apply">load preset</button>
     </div>
+
+    <!-- GLOBAL safety nets + LUT size. NOT step-scoped: they apply across the
+         whole pipeline. hue gate gates opposing-hue chroma in build (step 1)
+         AND the smoothness blur (step 3); luma guard re-clamps L into the
+         per-hue anchor band after the late stages. Both are fidelity nets,
+         conceptually siblings — grouped here, above the per-step params. -->
+    <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
+      <div class="slider">
+        <div class="lbl"><span>hue gate</span><span class="v" id="vHueGate">0.50</span></div>
+        <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Opposing-hue safety net (build + blur). 0 = kill any hue 90°+ off the cell's identity; 1 = only the exact opposite.">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>luma guard</span><span class="v" id="vLumaGuard">0.00</span></div>
+        <input type="range" id="lumaGuard" min="0" max="1" step="0.01" value="0.0" title="Late L re-clamp into the per-hue anchor luma band. 0 = off; 1 = hard clamp. Counters step-3 luma drift past the envelope.">
+      </div>
+      <div class="slider" style="margin-top:6px">
+        <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
+        <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
+      </div>
+    </div>
+    <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
 
     <!-- Build-stage params — shared between IDW and Stripes. lRange/abRange
          drive anisotropic distance for anchor weighting (IDW) and seed
@@ -634,10 +651,16 @@ const state = {
                            // Stripes: restamp Hue band radius. UI [0.25, 1].
     softness: 4,           // IDW power exponent; 1 = linear, 10 = hard nearest.
                            // Also drives Stripes step-1b iter count.
-    hueGate: 0.5,          // Hue-fidelity safety net. Fixed (no UI slider). Value at 90° off the
+    // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
+    hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
                            // texel's identity Hue. 0 = full gate (anti-aligned
-                           // → grey), 1 = no gate. Applied in FS_LUT_BUILD and
-                           // FS_LUT_BLUR after the chroma-preserving rescale.
+                           // → grey), 1 = no gate. Applied in FS_LUT_BUILD (step
+                           // 1) AND FS_LUT_BLUR (step 3) after the chroma rescale.
+    lumaGuard: 0.0,        // Late L re-clamp into the per-hue anchor luma band
+                           // (applyLEnvelopePass, after luma-look). 0 = off
+                           // (band relaxed to full range), 1 = hard clamp to the
+                           // curve. ext = 1 - lumaGuard. Independent of the
+                           // step-2 lExt envelope.
 
     // Texel→identity-LUT blend (applied inside FS_LUT_BUILD with anchor
     // coherence gate; 0 = full LUT effect, 1 = passthrough identity).
@@ -1784,11 +1807,10 @@ function stripes_buildLutGpu(N, palNReal){
 // Late-stage reach pass — reads from one 3D texture, writes the
 // desaturated result to another. Ping-pongs lutTex / lutTex2 like the
 // blur. Skipped on the empty-palette path.
-// Reusable L envelope clamp — only touches cells whose L lies OUTSIDE
-// the per-hue passthrough band [envLLo - uLExtLo, envLHi + uLExtHi]. Cells
-// inside the band pass through untouched. Each side off when its extension
-// is at max. When debugEnvelopeViz is on, cells the
-// clamp actually moved are painted black instead.
+// GLOBAL luma-guard pass — only touches cells whose L lies OUTSIDE the per-hue
+// band [envLLo - ext, envLHi + ext], ext = 1 - lumaGuard. guard 0 → ext 1 →
+// noop (band relaxed to full range); guard 1 → ext 0 → hard clamp at the curve.
+// Driven by the global lumaGuard param, NOT the step-2 lExt envelope.
 function applyLEnvelopePass(srcTex, dstTex){
   if (!srcTex || !dstTex) return;
   const gl = state.gl;
@@ -1807,10 +1829,13 @@ function applyLEnvelopePass(srcTex, dstTex){
     gl.uniform1i(gl.getUniformLocation(prog, 'uHueLCCurve'), 3);
   }
   gl.uniform1f(gl.getUniformLocation(prog, 'uN'),         N);
-  // Slider value = relaxedness = the shader's extension amount directly
-  // (1 = noop / no limit, 0 = clamp at the curve border).
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtLo'),    p.lExtLo);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtHi'),    p.lExtHi);
+  // GLOBAL luma guard — NOT the step-2 envelope. Re-clamps L into the per-hue
+  // anchor band after the late stages. ext = 1 - lumaGuard feeds the shader's
+  // floor/ceil extension: guard 0 → ext 1 → band relaxed to full range (noop);
+  // guard 1 → ext 0 → hard clamp at the curve. Symmetric floor/ceil.
+  const guardExt = 1.0 - (p.lumaGuard || 0);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtLo'),    guardExt);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtHi'),    guardExt);
   gl.uniform1f(gl.getUniformLocation(prog, 'uDebugViz'),  0);   // viz is now the preview line/ring overlays
   const uZ = gl.getUniformLocation(prog, 'uZ');
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
@@ -1927,11 +1952,9 @@ function applyLumaLookPass(){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  // Late-stage L envelope clamp — hard-clamps L to the extended passthrough
-  // band [envLLo - uLExtLo, envLHi + uLExtHi], conserving the max / min luma
-  // exactly (no skirt overshoot past the bound). Cells inside the band pass
-  // through untouched. When debugEnvelopeViz is on, cells the clamp actually
-  // touched are painted black so the affected region is visible at a glance.
+  // Global luma-guard re-clamp — pulls L back into the per-hue anchor band
+  // (strength = lumaGuard; off by default). Counters step-3 luma drift past the
+  // envelope without touching the step-2 lExt sliders.
   applyLEnvelopePass(state.lutTex, state.lutTex2);
   { const t = state.lutTex; state.lutTex = state.lutTex2; state.lutTex2 = t; }
   // Guarantee monotonic Luma up each column (no reversal) — runs last on L.
@@ -2905,7 +2928,10 @@ void main(){
       clamp(lab.x, 0.0, 1.0)                                    // L
     );
     vec3 outLab = texture(uLut3D, coord).rgb;
-    mapped = linearToSrgb(oklabToLinear(outLab));
+    // Gamut-map (reduce chroma to the largest in-gamut value at this L, keeping
+    // hue + luma) instead of hard per-channel clipping — no muddy/strange clip
+    // at the L extremes.
+    mapped = linearToSrgb(gamutMap(outLab.x, length(outLab.yz), atan(outLab.z, outLab.y)));
   }
   mapped = mix(src, mapped, uStrength);
   vec3 col = (vUV.x < uSplit) ? src : mapped;
@@ -3197,7 +3223,7 @@ ${OKLAB_GLSL}
 void main(){
   vec3 coord  = vec3(vUV.x, vUV.y, clamp(uL, 0.0, 1.0));
   vec3 outLab = texture(uLut3D, coord).rgb;
-  vec3 col    = linearToSrgb(oklabToLinear(outLab));
+  vec3 col    = linearToSrgb(gamutMap(outLab.x, length(outLab.yz), atan(outLab.z, outLab.y)));
   col = clamp(col, vec3(0.0), vec3(1.0));
   fragColor = vec4(col, 1.0);
 }`;
@@ -3428,7 +3454,14 @@ function makeHuePickerImage(){
       const tt = 1 - yFrac * 3;      // 1 at top, 0 at yFrac=1/3
       const e = tt*tt*tt*(tt*(tt*6 - 15) + 10);   // smootherstep
       boost += 1.0 * e;
-      perHue = e;
+    }
+    // perHue tapers across the upper half — keeps the per-hue cusp blend
+    // alive past the warm-hue cusps (red ≈ L 0.63) so the chroma curve
+    // does not dip between the upper-third boost region and the cusp,
+    // which previously showed as a U-shaped anomaly in bright red/pink.
+    if (yFrac < 0.5){
+      const tt = 1 - yFrac * 2;
+      perHue = tt*tt*tt*(tt*(tt*6 - 15) + 10);
     }
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
@@ -3579,7 +3612,10 @@ function buildHuePreviewSrc(){
       const tt = 1 - yFrac * 3;
       const e = tt*tt*tt*(tt*(tt*6 - 15) + 10);  // smootherstep (C² at both ends)
       boost += 1.0 * e;
-      perHue = e;
+    }
+    if (yFrac < 0.5){
+      const tt = 1 - yFrac * 2;
+      perHue = tt*tt*tt*(tt*(tt*6 - 15) + 10);
     }
     for (let x = 0; x < W; x++){
       const h = (x / W) * 360;
@@ -4366,6 +4402,10 @@ function init(){
       scheduleLutRebuild();
     });
   }
+  // Global safety nets (top section). hueGate → full rebuild (used in build +
+  // blur); lumaGuard → full rebuild (late-stage pass).
+  bindLutSlider('hueGate',    'vHueGate',    'hueGate',    v => v.toFixed(2));
+  bindLutSlider('lumaGuard',  'vLumaGuard',  'lumaGuard',  v => v.toFixed(2));
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('abRange',    'vAbRange',    'abRange',    v => v.toFixed(2));
   // Softness slider is inverted vs. its internal IDW exponent: slider position
@@ -4492,6 +4532,8 @@ function init(){
     'hard':     { lRange: 0.25, abRange: 0.25, hRange: 0.30, softness: 8.0, lPreserve: 0.00, cPreserve: 0.00, lExtLo: 0.10, lExtHi: 0.10, cExtLo: 0.12, cExtHi: 0.12, smoothness: 1, reach: 0.40, lumaLook: 0.30 },
   };
   const sliderMap = {
+    hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
+    lumaGuard:  ['lumaGuard',  'vLumaGuard',  v => v.toFixed(2)],
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     abRange:    ['abRange',    'vAbRange',    v => v.toFixed(2)],
     hRange:     ['hRange',     'vHRange',     v => v.toFixed(2)],
@@ -4566,6 +4608,8 @@ function init(){
     // Order mirrors the UI / pipeline order (state.params, sliderMap, and
     // the preset objects above all use the same order).
     'lutSize', 'lutMethod',
+    // Global safety nets
+    'hueGate', 'lumaGuard',
     // Build params
     'lRange', 'abRange', 'hRange', 'softness',
     // Build-stage texel→identity blend

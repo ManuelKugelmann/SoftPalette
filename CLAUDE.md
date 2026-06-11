@@ -24,7 +24,17 @@ Soft 3D Voronoi LUT in OkLab. Two build methods, shared post-build.
 seed. Voronoi cells implicit. OkLab: Luma=`lab.x`, Chroma=`length(lab.yz)`,
 Hue=`atan2(lab.z, lab.y)`. Chroma absolute, not Saturation.
 
+**Step ownership.** step1 = interpolate anchors; step2 = restore L/C ramps
+under envelope; step3 = effects on top. Params stay in their step (audited).
+**Global tier** (top UI section, below the mode/preset buttons, own separators —
+not step-scoped): `hueGate` + `lumaGuard` + `lutSize`.
+
 **Sliders.**
+- `hueGate` — GLOBAL opposing-hue safety net. Used in `FS_LUT_BUILD` (step 1)
+  AND `FS_LUT_BLUR` (step 3). `mix(-0.3,-0.97,hueGate)` cos cutoff. UI [0,1].
+- `lumaGuard` — GLOBAL late L re-clamp into the per-hue anchor band
+  (`applyLEnvelopePass`, after luma-look). 0=off (band → full range), 1=hard
+  clamp. ext = `1-lumaGuard`. Independent of step-2 `lExt`. UI [0,1].
 - `lRange` / `abRange` — anisotropic distance weights (σL / σab in IDW;
   nearest-seed weights in Stripes 1a). UI [0.25, 1].
 - `hRange` — IDW Gaussian Hue gate σ (rad); Stripes restamp band radius.
@@ -60,10 +70,11 @@ scalar (1e) is computed once and applied to both.
 
 Captured intermediates feed the inline stage previews: `lutTexStep1`
 (o0), `lutTexStep2` (o1 snapshot, top of `applyLateStages`), and the
-final `lutTex` (step 3). Stripes has no preserve/envelope → step1 ==
-step2 (it copies its build into `lutTexStep1`). A late L-only re-clamp
-(`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`) runs after luma-look when
-`debugEnvelope` is on, using the same `lExtLo/Hi`.
+final `lutTex` (step 3). Stripes captures step1 (`lutTexStep1`, seed-snap
+core) before `applyStripesFinishPass`, which applies preserve+envelope as
+step2 (`FS_LUT_STRIPES_FINISH`). A late L-only re-clamp (`applyLEnvelopePass`,
+`FS_LUT_L_ENVELOPE`) runs after luma-look, driven by the global `lumaGuard`
+(ext = `1-lumaGuard`); off at guard 0.
 
 ### Step 1 (Stripes) — `stripes_buildLutGpu` (GPU, real seeds only)
 
