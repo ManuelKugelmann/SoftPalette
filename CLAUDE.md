@@ -18,7 +18,8 @@ edit literals. Install hook: `git config core.hooksPath .githooks`.
 
 ## Algorithm
 
-Soft 3D Voronoi LUT in OkLab. Two build methods, shared post-build.
+Soft 3D Voronoi LUT in OkLab. Single build method (IDW Shepard), shared
+post-build late stages. (Stripes was removed — one algo.)
 
 **Terms.** "LUT texel" = N³ cube cell at (L, a, b). "anchor" = palette
 seed. Voronoi cells implicit. OkLab: Luma=`lab.x`, Chroma=`length(lab.yz)`,
@@ -26,23 +27,17 @@ Hue=`atan2(lab.z, lab.y)`. Chroma absolute, not Saturation.
 
 **Step ownership.** step1 = interpolate anchors; step2 = restore L/C ramps
 under envelope; step3 = effects on top. Params stay in their step (audited).
-**Global tier** (top UI section, below the mode/preset buttons, own separators —
-not step-scoped): `hueGate` + `lumaGuard` + `lutSize`.
+**Global tier** (top UI section, below the preset buttons, own separators —
+not step-scoped): `lutSize` + `hueGate`.
 
 **Sliders.**
 - `hueGate` — GLOBAL opposing-hue safety net. Used in `FS_LUT_BUILD` (step 1)
   AND `FS_LUT_BLUR` (step 3). `mix(-0.3,-0.97,hueGate)` cos cutoff. UI [0,1].
-- `lumaGuard` — GLOBAL late L re-clamp into the per-hue anchor band
-  (`applyLEnvelopePass`, after luma-look). 0=off (band → full range), 1=hard
-  clamp. ext = `1-lumaGuard`. Independent of step-2 `lExt`. UI [0,1].
-- `lRange` / `abRange` — anisotropic distance weights (σL / σab in IDW;
-  nearest-seed weights in Stripes 1a). UI [0.25, 1].
-- `hRange` — IDW Gaussian Hue gate σ (rad); Stripes restamp band radius.
-  UI [0.25, 1].
-- `softness` — IDW Shepard power; Stripes 1b iters via
-  `round(10/s)`. UI [1, 10].
-- `lPreserve` / `cPreserve` — texel→identity blend in `FS_LUT_BUILD`,
-  coherence-gated. 0=snap, 1=passthrough. **IDW only.**
+- `lRange` / `abRange` — anisotropic distance weights (σL / σab). UI [0.25, 1].
+- `hRange` — Gaussian Hue gate σ (rad). UI [0.25, 1].
+- `softness` — Shepard power. UI [1, 10].
+- `lPreserve` / `cPreserve` — texel→identity blend in `FS_LUT_BUILD` (o1),
+  coherence-gated. 0=snap, 1=passthrough.
 - Envelope = dual-thumb floor/ceil **extension** per channel:
   `lExtLo`/`lExtHi` (luma, [0,1]) + `cExtLo`/`cExtHi` (chroma, [0,1]
   fraction × `LUT_AB_RANGE`). Each EXTENDS the per-hue curve bound
@@ -70,23 +65,10 @@ scalar (1e) is computed once and applied to both.
 
 Captured intermediates feed the inline stage previews: `lutTexStep1`
 (o0), `lutTexStep2` (o1 snapshot, top of `applyLateStages`), and the
-final `lutTex` (step 3). Stripes captures step1 (`lutTexStep1`, seed-snap
-core) before `applyStripesFinishPass`, which applies preserve+envelope as
-step2 (`FS_LUT_STRIPES_FINISH`). A late L-only re-clamp (`applyLEnvelopePass`,
-`FS_LUT_L_ENVELOPE`) runs after luma-look, driven by the global `lumaGuard`
-(ext = `1-lumaGuard`); off at guard 0.
-
-### Step 1 (Stripes) — `stripes_buildLutGpu` (GPU, real seeds only)
-
-- 1a. Voronoi-rotate texel→nearest seed Hue (same anisotropic Lab
-  metric); keep own Luma+|C|.
-- 1b. Iterate `stripeIters` (`stripeItersFromSoftness`) × { plain 3D
-  blur, restamp texels w/in `hRange` of a seed Hue }.
-- 1c. Pin each anchor texel to exact (L, a, b).
-
-Shaders `FS_LUT_STRIPES_SEED` + `FS_LUT_GAUSS` + `FS_LUT_STRIPES_RESTAMP`.
-The CPU builder + GPU/CPU toggle were retired — GPU is the only path.
-Stripes 1 ignores `cPreserve`/`lPreserve`/envelope (so step1 == step2).
+final `lutTex` (step 3). The step-2 luma envelope (`lExtLo/Hi`) is RE-ASSERTED
+late (`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`) after luma-look — luma-look /
+blur can drift L back out of band. Same control, keyed on output hue; noop when
+`lExt=1`.
 
 ### Shared late stages — `applyLateStages`
 
@@ -94,7 +76,7 @@ Stripes 1 ignores `cPreserve`/`lPreserve`/envelope (so step1 == step2).
 3. Blur × `smoothness` iters (3 axes + restamp). `FS_LUT_BLUR`:
    chroma-preserving rescale + hue safety net; no
    `cPreserve`/`lPreserve` (build-stage only). `uBlurStrength` tapers
-   1.0→0.3 across iters (also `FS_LUT_GAUSS`).
+   1.0→0.3 across iters.
 4. Final anchor stamp.
 5. Reach desaturation (`applyReachPass`) — Chroma falloff vs.
    anchor distance.
