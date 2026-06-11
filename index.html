@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T19:51:35Z">
+<meta name="build" content="2026-06-11T20:57:11Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -237,9 +237,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <body>
 
 <header>
-  <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
+  <h1><a href="https://github.com/ManuelKugelmann/SoftPalette" target="_blank" rel="noopener" style="color:#fff;text-decoration:none">SoftPalette</a> <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-11T19:51:35Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-11T20:57:11Z</span>
   </div>
 </header>
 
@@ -377,8 +377,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <canvas id="triLuma" width="124" height="112" title="Brightness blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
       </div>
       <div style="flex:1;text-align:center">
-        <div class="note" style="color:var(--txd)">anchor hue blend</div>
-        <canvas id="triHue" width="124" height="112" title="Colour blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
+        <div class="note" style="color:var(--txd)">color blend</div>
+        <canvas id="triHue" width="124" height="112" title="Color blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
       </div>
     </div>
     <div class="slider" style="margin-top:6px">
@@ -465,6 +465,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button id="loadPreset"  style="flex:1" title="Load settings from file">load</button>
       <button id="copyPreset"  style="flex:1" title="Copy settings to clipboard">copy</button>
       <button id="pastePreset" style="flex:1" title="Paste settings from clipboard">paste</button>
+    </div>
+    <div class="row full compact" style="margin-top:4px;display:flex;gap:4px">
+      <button id="exportCube"  style="flex:1" title="Export baked LUT as a .cube file (sRGB → sRGB)">export .cube</button>
     </div>
     <input type="file" id="loadPresetFile" accept="application/json,.json" style="display:none">
   </section>
@@ -2516,6 +2519,43 @@ void main(){
   fragColor = vec4(col, 1.0);
 }`;
 
+// .cube LUT export. Renders a strip of LUT_SIZE tiles (each N×N) so each pixel
+// (x, y) maps to an integer input cell (r=x%N, g=x/N, b=y). The shader runs the
+// same sRGB → OkLab → 3D-LUT → OkLab → gamut-map → sRGB pipeline as the per-
+// pixel shader so the exported file behaves identically when applied externally.
+const FS_LUT_EXPORT = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+out vec4 fragColor;
+uniform sampler3D uLut3D;
+uniform int   uPalN;
+uniform float uAbRange;
+uniform int   uLutSize;
+${OKLAB_GLSL}
+void main(){
+  int x = int(floor(gl_FragCoord.x));
+  int y = int(floor(gl_FragCoord.y));
+  int N = uLutSize;
+  int ri = x % N;
+  int gi = x / N;
+  int bi = y;
+  vec3 src = vec3(float(ri), float(gi), float(bi)) / float(N - 1);
+  vec3 mapped = src;
+  if (uPalN > 0){
+    vec3 lin = srgbToLinear(src);
+    vec3 lab = linearToOklab(lin);
+    vec3 coord = vec3(
+      clamp((lab.y + uAbRange) / (2.0 * uAbRange), 0.0, 1.0),
+      clamp((lab.z + uAbRange) / (2.0 * uAbRange), 0.0, 1.0),
+      clamp(lab.x, 0.0, 1.0)
+    );
+    vec3 outLab = texture(uLut3D, coord).rgb;
+    mapped = linearToSrgb(gamutMap(outLab.x, length(outLab.yz), atan(outLab.z, outLab.y)));
+  }
+  mapped = clamp(mapped, vec3(0.0), vec3(1.0));
+  fragColor = vec4(mapped, 1.0);
+}`;
+
 // LUT slice preview: samples the actual baked 3D LUT (post-blur, post-stamps)
 // at a fixed L plane, mapping vUV.x → a and vUV.y → b. Matches whatever the
 // per-pixel shader would sample for an input pixel at this (L, a, b), so the
@@ -2794,6 +2834,7 @@ function initGL(){
   state.programs.lutStamp = program(VS, FS_LUT_STAMP);
   state.programs.lutStampSoft = program(VS, FS_LUT_STAMP_SOFT);
   state.programs.lutSlice    = program(VS, FS_LUT_SLICE);
+  state.programs.lutExport   = program(VS, FS_LUT_EXPORT);
   state.programs.lutLumalook = program(VS, FS_LUT_LUMALOOK);
   state.programs.lutLumaOrder = program(VS, FS_LUT_LUMA_ORDER);
   state.programs.lutReach    = program(VS, FS_LUT_REACH);
@@ -4335,6 +4376,84 @@ function init(){
     applyJsonText(txt, pasteBtn);
   });
 
+  // .cube LUT export — renders FS_LUT_EXPORT to a (N*N)×N RGBA8 FBO so each
+  // pixel encodes one (r, g, b) cube cell, reads the bytes back, and formats
+  // them as an Adobe .cube file. sRGB → sRGB, the same pipeline the on-screen
+  // preview applies.
+  const exportBtn = document.getElementById('exportCube');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
+    const gl = state.gl;
+    if (!gl || !state.lutTex){ flashBtn(exportBtn, 'no LUT', false); return; }
+    const N = state.lutN;
+    if (!N){ flashBtn(exportBtn, 'no LUT', false); return; }
+    const W = N * N, H = N;
+    // One-shot offscreen RGBA8 FBO. Created on first use, then reused (cheap).
+    if (!state.lutExportFbo){
+      state.lutExportTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, state.lutExportTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      state.lutExportFbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutExportFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.lutExportTex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      state.lutExportW = W; state.lutExportH = H;
+    } else if (state.lutExportW !== W || state.lutExportH !== H){
+      gl.bindTexture(gl.TEXTURE_2D, state.lutExportTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      state.lutExportW = W; state.lutExportH = H;
+    }
+    const prog = state.programs.lutExport;
+    gl.useProgram(prog);
+    gl.bindVertexArray(state.vao);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_3D, state.lutTex);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uLut3D'), 1);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uPalN'), Math.min(state.palette.length, MAX_PAL));
+    gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uLutSize'), N);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutExportFbo);
+    gl.viewport(0, 0, W, H);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const buf = new Uint8Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // Format as .cube. Iteration order: r fastest, then g, then b — matches
+    // the Adobe spec and how the shader laid out the tiles.
+    const lines = [
+      'TITLE "SoftPalette"',
+      `LUT_3D_SIZE ${N}`,
+      'DOMAIN_MIN 0.0 0.0 0.0',
+      'DOMAIN_MAX 1.0 1.0 1.0',
+      '',
+    ];
+    for (let bi = 0; bi < N; bi++){
+      for (let gi = 0; gi < N; gi++){
+        for (let ri = 0; ri < N; ri++){
+          const x = gi * N + ri;
+          const y = bi;
+          const o = (y * W + x) * 4;
+          const r = (buf[o]   / 255).toFixed(6);
+          const g = (buf[o+1] / 255).toFixed(6);
+          const b = (buf[o+2] / 255).toFixed(6);
+          lines.push(`${r} ${g} ${b}`);
+        }
+      }
+    }
+    const text = lines.join('\n') + '\n';
+    const blob = new Blob([text], {type: 'text/plain'});
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `softpalette-${N}.cube`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    flashBtn(exportBtn, `${N}³ ✓`, true);
+  });
+
   // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
   // Slider == 0 disables that axis. Number of inserts per gap is automatic
   // (floor(gap / threshold)), so smaller threshold → denser fill.
@@ -4426,19 +4545,6 @@ function init(){
   // Resize handles split line
   window.addEventListener('resize', updateSplitLine);
   new ResizeObserver(updateSplitLine).observe(document.getElementById('canvasWrap'));
-
-  // Build badge: click-to-copy
-  const badge = document.getElementById('buildBadge');
-  if (badge){
-    badge.style.cursor = 'pointer';
-    badge.addEventListener('click', () => {
-      const txt = badge.textContent.replace(/^build\s+/, '');
-      navigator.clipboard?.writeText(txt);
-      const orig = badge.textContent;
-      badge.textContent = '✓ copied';
-      setTimeout(() => { badge.textContent = orig; }, 900);
-    });
-  }
 
   // Boot with the 'balanced' LUT preset: sets params, syncs sliders, marks
   // the button selected, schedules the initial build. Must run before
