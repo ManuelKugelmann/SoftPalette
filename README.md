@@ -3,6 +3,8 @@ Map any image into a palette you choose. SoftPalette turns a handful of hex
 colors into a smooth color grade — anchored to your palette where the image
 hits a palette hue, blending continuously between them everywhere else.
 
+![SoftPalette](softpalette.jpg)
+
 ## Try it
 - <https://manuelkugelmann.github.io/SoftPalette/>
 - githack (HEAD): <https://raw.githack.com/ManuelKugelmann/SoftPalette/main/index.html>
