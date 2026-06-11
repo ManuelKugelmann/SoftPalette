@@ -31,38 +31,20 @@ Additional steps adjust luma and chroma ramps, envelopes, smoothness, reach, etc
 ## Controls
 The LUT params card runs top → bottom in pipeline order.
 
-**Global**
-
-| Control | What it does |
+| **Global** | |
 |---|---|
 | lut size | 17³ → 257³ cube. Higher = more precise, slightly slower |
 | hue gate | Opposing-hue safety net — curbs confidently-wrong hues |
 | chroma gate | Near-grey desaturation. 1 = keep chroma, 0 = full desat |
-
-**Step 1 — Interpolate anchors.**
-anchor blend weights luma vs chroma vs hue:
-
-| Control | What it does |
-|---|---|
+| **Step 1** | **interpolate anchors**  |
 | luma blend (triangle) | which anchors drive each cell's **luma** |
 | hue blend (triangle) | which drive its **colour** (chroma + hue). Pull the two pins apart to decouple luma from colour |
 | anchor softness | blend sharpness (low = mushy, high = near-Voronoi) |
 | blur | post-build smoothing iterations |
-
-**Step 2 — Restore luma and chroma ramps, bounded by the palette envelope.** 
-
-| Control | What it does |
-|---|---|
+| **Step 2** | **restore luma and chroma ramps, bounded by the palette envelope.** |
 | luma / chroma preserve | keep interpolated palette values (0) or keep identity ramp (1) |
 | luma / chroma envelope | dual-thumb limit on how far output may leave the palette's per-hue range (0 = clamp at the band, 1 = no limit) |
-
-**Step 3 — Effects.**
-
-| Control | What it does |
-|---|---|
+| **Step 3** | **effects** |
 | blur | post-build smoothing iterations |
 | reach | distance beyond which far-out colors desaturate instead of latching to a wrong hue |
 | lut blend | mix the result with the original (100 % = full effect) |
-
-**extend palette** (toggle) auto-fills each anchor with a constellation of
-luma / chroma / hue variants.
