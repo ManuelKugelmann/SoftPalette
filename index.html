@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T09:36:57Z">
+<meta name="build" content="2026-06-11T13:51:49Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-11T09:36:57Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-11T13:51:49Z</span>
   </div>
 </header>
 
@@ -302,6 +302,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <section class="center">
   <div id="imageTabs" class="tabs">
     <button id="hueImage"        class="tab tab-synth" title="Test image: hue & brightness sweep">hues</button>
+    <button id="chromaRampImage" class="tab tab-synth" title="Test image: hue × chroma ramp at fixed L">chroma</button>
     <button id="resetImage"      class="tab tab-synth" title="Test image: sunset landscape">sunset</button>
     <button id="landscapeImage"  class="tab tab-synth" title="Test image: landscape scene">landscape</button>
     <button id="portraitImage"   class="tab" title="Portrait — man (Wikimedia)">portrait M</button>
@@ -347,6 +348,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-lutpreset="soft"      style="flex:1" title="Soft blend between colours">soft</button>
       <button data-lutpreset="balanced"  style="flex:1" title="Balanced blend">balanced</button>
       <button data-lutpreset="hard"      style="flex:1" title="Sharp colour edges">hard</button>
+      <button data-lutpreset="tone"      style="flex:1" title="Keep brightness, recolour">tone</button>
     </div>
 
     <!-- GLOBAL: LUT size + hue gate. NOT step-scoped: hue gate gates
@@ -383,8 +385,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       </div>
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">5.0</span></div>
-      <input type="range" id="softness" min="1" max="8" step="0.1" value="5.0">
+      <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">0.50</span></div>
+      <input type="range" id="softness" min="0" max="1" step="0.01" value="0.5">
     </div>
 
     <!-- step 1 preview — IDW core (lutTexStep1), before preserve+envelope. -->
@@ -407,39 +409,44 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
          The floor slider is mirrored so both handles meeting at the centre =
          fully constrained from both sides; both at the outer edges = relaxed. -->
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>luma envelope</span><span class="v"><span id="vLExtLo">1.00</span> | <span id="vLExtHi">1.00</span></span></div>
+      <div class="lbl"><span>luma envelope</span><span class="v"><span id="vLExtLo">0.50</span> <span style="opacity:0.4">|</span> <span id="vLExtHi">0.50</span></span></div>
       <div class="intervalpair">
-        <input type="range" id="lExtLo" min="0" max="1" step="0.01" value="1">
-        <input type="range" id="lExtHi" min="0" max="1" step="0.01" value="1">
+        <input type="range" id="lExtLo" min="0" max="1" step="0.01" value="0.5">
+        <input type="range" id="lExtHi" min="0" max="1" step="0.01" value="0.5">
       </div>
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma envelope</span><span class="v"><span id="vCExtLo">1.00</span> | <span id="vCExtHi">1.00</span></span></div>
+      <div class="lbl"><span>chroma envelope</span><span class="v"><span id="vCExtLo">0.50</span> <span style="opacity:0.4">|</span> <span id="vCExtHi">0.50</span></span></div>
       <div class="intervalpair">
-        <input type="range" id="cExtLo" min="0" max="1" step="0.01" value="1">
-        <input type="range" id="cExtHi" min="0" max="1" step="0.01" value="1">
+        <input type="range" id="cExtLo" min="0" max="1" step="0.01" value="0.5">
+        <input type="range" id="cExtHi" min="0" max="1" step="0.01" value="0.5">
       </div>
     </div>
 
-    <!-- step 2 preview — after preserve + envelope (lutTexStep2). -->
+    <!-- step 2 preview — after preserve + envelope (lutTexStep2). Top = hue×L
+         ramp (luma envelope), bottom = hue×chroma ramp (chroma envelope). -->
     <canvas id="step2Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px"></canvas>
+    <canvas id="step2cPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:4px" title="step 2 · chroma ramp (hue × chroma at fixed L) — shows the chroma envelope"></canvas>
 
-    <!-- Late stages, in execution order: smoothness blur → reach → luma look. -->
+    <!-- Late stages, in execution order: blur (N iters, each ending in a hard
+         restamp) → closing anchor stamp → reach → luma look. Blur + closing
+         stamp grouped: both shape how strongly palette colours pin vs. smooth
+         into the surround at the end of the smoothing pass. -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>blur</span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="30" step="1" value="0">
     </div>
+    <div class="slider" style="margin-top:6px" title="Keep palette colours pure at end">
+      <div class="lbl"><span>anchor stamp smoothness</span><span class="v" id="vStampStrength">0.50</span></div>
+      <input type="range" id="stampStrength" min="0" max="1" step="0.01" value="0.5">
+    </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>reach</span><span class="v" id="vReach">0.25</span></div>
-      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.25">
+      <div class="lbl"><span>reach</span><span class="v" id="vReach">0.50</span></div>
+      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.5">
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>luma look</span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
-    </div>
-    <div class="slider" style="margin-top:6px" title="Keep palette colours pure at end">
-      <div class="lbl"><span>anchor stamp · faithful↔smooth</span><span class="v" id="vStampStrength">0.70</span></div>
-      <input type="range" id="stampStrength" min="0" max="1" step="0.01" value="0.7">
     </div>
 
     <!-- Final blend with identity -->
@@ -451,14 +458,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <!-- step 3 preview — final pipeline (blur/reach/luma-look + blend). -->
     <canvas id="step3Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px"></canvas>
 
-    <!-- Per-stage debug toggles. Default all on. Flip a stage off to
-         isolate the others' contribution to an artifact. -->
+    <!-- LUT stage selector — pick which pipeline step drives the test image. -->
     <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
-      <div style="display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:var(--txd)">
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Show brightness limits"><input type="checkbox" id="debugEnvVizL" checked style="margin:0">L env viz</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Show saturation limits"><input type="checkbox" id="debugEnvVizC" checked style="margin:0">C env viz</label>
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--txd)" title="Pick processing step to preview">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)" title="Pick processing step to preview">
         LUT
         <select id="lutStage" style="flex:1;background:var(--bg3);color:var(--tx);border:1px solid var(--bd);font:inherit;font-size:11px;padding:2px 4px">
           <option value="1">step 1 — idw core</option>
@@ -641,7 +643,7 @@ const state = {
     // the two pins apart to decouple luma from colour.
     wLuma: [1/3, 1/3, 1/3],
     wHue:  [1/3, 1/3, 1/3],
-    softness: 6,           // IDW power exponent (UI shows 11−exp = 5, "balanced").
+    softness: 4.5,         // IDW power exponent (UI shows 11−exp = 6.5, "balanced").
     // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
     hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
                            // texel's identity Hue. 0 = full gate (anti-aligned
@@ -664,14 +666,14 @@ const state = {
     // Envelope = relaxedness: 1 = no limit (no clamp, the extension covers the
     // full range), 0 = clamp exactly at the per-hue curve border. Consumed
     // directly as the shader's extension amount (1 = noop).
-    lExtLo: 1.00,
-    lExtHi: 1.00,
-    cExtLo: 1.00,
-    cExtHi: 1.00,
+    lExtLo: 0.5,
+    lExtHi: 0.5,
+    cExtLo: 0.5,
+    cExtHi: 0.5,
 
     // Shared late stages (execution order).
     smoothness: 2,         // post-build Gaussian blur iter count (each iter = 3 axis blurs + anchor restamp)
-    reach: 0.25,           // late-stage anchor rejection radius (Lab units). Beyond reach the texel desaturates.
+    reach: 0.5,            // late-stage anchor rejection radius (Lab units). Beyond reach the texel desaturates.
     lumaLook: 0.25,        // late-stage rotation of arg(yz) toward the Luma→Hue curve.
 
     // Final per-pixel blend with the original image (post LUT lookup).
@@ -691,7 +693,7 @@ const state = {
     // the anchor cell's neighbour average (fully smooth). Blur keeps anchors
     // pinned hard throughout; only this closing stamp is softened, so anchors
     // stay strong through the blur and blend into the surround at the end.
-    stampStrength:    0.7,
+    stampStrength:    0.5,
     // Debug: which pipeline-stage LUT drives the test image (1/2/3). 3 = final.
     lutStage:         2,
 
@@ -720,7 +722,7 @@ const state = {
 };
 
 const IMAGE_BTN_IDS = [
-  'hueImage', 'resetImage', 'landscapeImage',
+  'hueImage', 'chromaRampImage', 'resetImage', 'landscapeImage',
   'portraitImage', 'candidImage', 'classicImage', 'crowdImage',
   'natureImage', 'lakeImage', 'parrotsImage', 'colorfulImage',
   'starryNight', 'waveImage', 'monaLisaImage',
@@ -1380,17 +1382,17 @@ const HUE_ENV_BINS = 32;
 //     every anchor sits inside the envelope at and near its own hue,
 //     so the LUT's extreme anchor cells still show through at low LUT
 //     sizes (no smoothing can pull the bound past an anchor).
-// Synthetic anchors excluded — envelope reflects user-curated palette.
+// Uses ALL anchors (real AND synthetic) — synthetics are not treated specially.
 function computeHueLCCurve(seeds){
   const buf = new Float32Array(HUE_ENV_BINS * 4);
-  // Include ALL non-synthetic anchors (chromatic AND near-grey). A low-chroma
-  // anchor has no real hue, so it influences the envelope across a WIDE hue
-  // range — the whole ring as chroma → 0. So black sets the L floor and white
-  // the L ceil at every hue. C_REF is the chroma at which an anchor fully
-  // localizes to its own hue (above it = local, at 0 = ring-wide).
+  // Include ALL anchors (chromatic AND near-grey, real AND synthetic). A
+  // low-chroma anchor has no real hue, so it influences the envelope across a
+  // WIDE hue range — the whole ring as chroma → 0. So black sets the L floor
+  // and white the L ceil at every hue. C_REF is the chroma at which an anchor
+  // fully localizes to its own hue (above it = local, at 0 = ring-wide).
   const TWO_PI = 2 * Math.PI;
   const C_REF  = 0.08;
-  const A = seeds.filter(s => !s.synthetic).map(s => ({
+  const A = seeds.map(s => ({
     h: Math.atan2(s.b, s.a),
     L: s.L,
     C: Math.hypot(s.a, s.b),
@@ -1408,11 +1410,6 @@ function computeHueLCCurve(seeds){
     if (a.L > gHi) gHi = a.L;
     if (a.C > gCHi) gCHi = a.C;
   }
-  // If the palette has NO desaturated / b&w anchor (everything is colourful),
-  // there's no grey reference pinning the brightness range, so let the hues
-  // span the full L axis (dark + bright versions reach 0 and 1). A desaturated
-  // anchor reinstates anchor-governed floor/ceil.
-  const hasDesat = A.some(a => a.C < 0.04);
   const sigma       = Math.PI / 4;
   const inv2s2      = 1 / (2 * sigma * sigma);
   const beta        = 4;
@@ -1446,14 +1443,54 @@ function computeHueLCCurve(seeds){
       const chromaT = Math.min(1, a.C / C_REF);
       const radius  = tightRadius + (1 - chromaT) * (Math.PI - tightRadius);
       if (d > radius) continue;
-      if (a.L < lLo) lLo = a.L;
-      if (a.L > lHi) lHi = a.L;
+      // L containment is handled smoothly after the blur (metaball bumps), so
+      // no hard L inclusion here — only the chroma ceil.
       if (d <= tightRadius && a.C > cHi) cHi = a.C;
     }
-    buf[i*4+0] = hasDesat ? Math.max(0, lLo) : 0.0;
-    buf[i*4+1] = hasDesat ? Math.min(1, lHi) : 1.0;
+    // Always the real per-hue anchor L band — so the envelope clamp + overlay
+    // are meaningful and the lExt sliders react. (Chromatic-only palettes still
+    // span the full L axis at the DEFAULT lExt=1, which relaxes the clamp past
+    // [0,1]; the band only bites once a slider is tightened.)
+    buf[i*4+0] = Math.max(0, lLo);
+    buf[i*4+1] = Math.min(1, lHi);
     buf[i*4+2] = 0;
     buf[i*4+3] = cHi;
+  }
+  // Smooth the L band strongly along the hue ring (circular 0.25/0.5/0.25 blur),
+  // then RE-INCLUDE every anchor with a smooth Gaussian "metaball" bump so the
+  // band is guaranteed to contain all anchors while staying smooth.
+  const lo = new Float32Array(HUE_ENV_BINS), hi = new Float32Array(HUE_ENV_BINS);
+  for (let i = 0; i < HUE_ENV_BINS; i++){ lo[i] = buf[i*4+0]; hi[i] = buf[i*4+1]; }
+  for (let pass = 0; pass < 12; pass++){
+    const lo2 = lo.slice(), hi2 = hi.slice();
+    for (let i = 0; i < HUE_ENV_BINS; i++){
+      const a = (i - 1 + HUE_ENV_BINS) % HUE_ENV_BINS, b = (i + 1) % HUE_ENV_BINS;
+      lo[i] = 0.25 * lo2[a] + 0.5 * lo2[i] + 0.25 * lo2[b];
+      hi[i] = 0.25 * hi2[a] + 0.5 * hi2[i] + 0.25 * hi2[b];
+    }
+  }
+  // Metaball re-inclusion: each anchor adds a Gaussian bump (height = how far it
+  // sits outside the smoothed band) to ceil (above) or floor (below). At the
+  // anchor's own bin the bump = the full deficit, so the band reaches its L;
+  // bumps are additive & one-sided, so containment can't be undone, and the sum
+  // of Gaussians stays smooth.
+  const BSIG = 1.6;
+  const bump = (arr, c, amt, sgn) => {
+    for (let j = 0; j < HUE_ENV_BINS; j++){
+      let d = Math.abs(j - c); d = Math.min(d, HUE_ENV_BINS - d);
+      arr[j] += sgn * amt * Math.exp(-d * d / (2 * BSIG * BSIG));
+    }
+  };
+  for (const a of A){
+    const ci = ((Math.round((a.h + Math.PI) / TWO_PI * HUE_ENV_BINS - 0.5) % HUE_ENV_BINS) + HUE_ENV_BINS) % HUE_ENV_BINS;
+    const dHi = a.L - hi[ci]; if (dHi > 0) bump(hi, ci, dHi, +1);
+    const dLo = lo[ci] - a.L; if (dLo > 0) bump(lo, ci, dLo, -1);
+  }
+  // ceil must be ≥ floor; if smoothing/bumps inverted them, collapse to the mean.
+  for (let i = 0; i < HUE_ENV_BINS; i++){
+    let l = Math.max(0, lo[i]), h = Math.min(1, hi[i]);
+    if (h < l){ const m = 0.5 * (l + h); l = m; h = m; }
+    buf[i*4+0] = l; buf[i*4+1] = h;
   }
   return buf;
 }
@@ -1739,11 +1776,17 @@ function applyLumaLookPass(){
 // Prefix-MAX scan of lab.x along the z (input-L) axis → monotonic non-decreasing
 // output Luma per (a, b) column. Log-step ping-pong (offsets 1,2,4,… ≥ N), so
 // O(N·log N) slice draws. Only lab.x changes; yz pass through.
-function applyLumaOrderPass(){
+// Prefix-MAX scan up the L column → monotonic non-decreasing output luma (no
+// reversals). Generalized: with no args it ping-pongs state.lutTex/lutTex2 and
+// updates them; with (srcTex, dstTex) it scans that pair and RETURNS the texture
+// holding the result (parity-dependent).
+function applyLumaOrderPass(srcTex, dstTex){
   const gl = state.gl;
   const N  = state.lutN;
   const prog = state.programs.lutLumaOrder;
-  if (!prog) return;
+  if (!prog) return srcTex || state.lutTex;
+  const useState = !srcTex;
+  let src = srcTex || state.lutTex, dst = dstTex || state.lutTex2;
   gl.useProgram(prog);
   gl.bindVertexArray(state.vao);
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
@@ -1753,7 +1796,6 @@ function applyLumaOrderPass(){
   const uZ   = gl.getUniformLocation(prog, 'uZ');
   const uOff = gl.getUniformLocation(prog, 'uOffset');
   const uSrc = gl.getUniformLocation(prog, 'uSrc');
-  let src = state.lutTex, dst = state.lutTex2;
   for (let off = 1; off < N; off *= 2){
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_3D, src);
@@ -1766,7 +1808,15 @@ function applyLumaOrderPass(){
     }
     const t = src; src = dst; dst = t;
   }
-  state.lutTex = src; state.lutTex2 = dst;
+  if (useState){ state.lutTex = src; state.lutTex2 = dst; }
+  return src;
+}
+
+// Make one LUT texture's columns monotonic in place, using `scratch` as the
+// ping-pong partner (copies back if the parity left the result in scratch).
+function makeColumnMonotonic(tex, scratch, N){
+  const r = applyLumaOrderPass(tex, scratch);
+  if (r !== tex) copyLut3D(r, tex, N);
 }
 
 // LumaLook is a late-stage cell rotation — changing it just re-runs the
@@ -1816,6 +1866,13 @@ function applyLateStages(seeds, N){
   // Snapshot step-2 (post-build = after preserve+envelope, before any late
   // stage) for the step-2 preview. IDW fills lutTexStep1 via MRT during build.
   copyLut3D(state.lutTex, state.lutTexStep2, N);
+
+  // Guarantee monotonic (non-decreasing) output luma up each column for the
+  // step-1 and step-2 snapshots too — the gates/preserve/envelope can otherwise
+  // leave small reversals. lutTex2 is free scratch here (the blur below
+  // reinitializes it). step-3 gets its own luma-order pass at the very end.
+  makeColumnMonotonic(state.lutTexStep1, state.lutTex2, N);
+  makeColumnMonotonic(state.lutTexStep2, state.lutTex2, N);
 
   // Anchor stamp right after the build — guarantees that the LUT cell at
   // every seed's Lab holds the seed's EXACT value before any blur runs.
@@ -1911,10 +1968,8 @@ function recomputeLut(){
 
   const t0 = performance.now();
   uploadSeeds(packSeeds(seeds));
-  // The luma curve is computed from REAL palette anchors only — the
-  // L↔hue correlation is what the user picked, not anything synth seeds added.
-  const realSeeds = seeds.filter(s => !s.synthetic);
-  uploadLumaCurve(computeLumaCurve(realSeeds.length ? realSeeds : seeds));
+  // Curves use ALL anchors (real + synthetic) — synthetics aren't special.
+  uploadLumaCurve(computeLumaCurve(seeds));
   state.hueLCCurve = computeHueLCCurve(seeds);
   uploadHueLCCurve(state.hueLCCurve);
   ensureLutTexture(N);
@@ -2006,7 +2061,7 @@ function validateAnchorNeighbours(){
   const gl = state.gl;
   if (!gl || !state.lutTex || !state.lutFbo) return null;
   const N = state.lutN;
-  const seeds = paletteSeeds().filter(s => !s.synthetic);
+  const seeds = paletteSeeds();   // all anchors (real + synthetic) are stamped
   if (seeds.length === 0 || N < 2) return null;
 
   // Collect z-slices we need (anchor li ± 1). Detect cell collisions:
@@ -2329,7 +2384,7 @@ void main(){
     // (atan singularity at the grey axis), so gating there flips cell-to-cell =
     // pinwheel feathering. conf ramps 0→1 with chroma so the gate engages only
     // where the cell's hue is meaningful.
-    float conf  = smoothstep(0.01, 0.05, sqrt(cellC2));
+    float conf  = smoothstep(0.0, 0.10, sqrt(cellC2));
     float shift = (1.0 - hueGateMult) * conf;   // 0 = aligned/low-chroma, 1 = opposing
     if (shift > 1e-3 && magAB > 1e-6 && dot(nearAB, nearAB) > 1e-8){
       // Rotate the output hue toward the nearest palette anchor's hue.
@@ -2345,7 +2400,7 @@ void main(){
     float opposeChroma = mix(1.0, 0.3, shift);
     // chromaGate: fade near-grey texels (no reliable hue) toward grey.
     // 1 = max relaxation (keep chroma); 0 = full desat near the grey axis.
-    float ct = mix(smoothstep(0.002, 0.025, sqrt(cellC2)), 1.0, uChromaGate);
+    float ct = mix(smoothstep(0.0, 0.06, sqrt(cellC2)), 1.0, uChromaGate);
     gate = ct * opposeChroma;
   }
 
@@ -2365,7 +2420,10 @@ void main(){
   // full range → noop. Beyond the edge the value compresses into a skirt via
   // boundary ± softW·(1 - exp(-over/softW)).
   const float PI = 3.14159265359;
-  float hueT = atan(b, a) / (2.0 * PI) + 0.5;
+  // Look the envelope band up by the OUTPUT hue (the assigned palette hue), not
+  // the input cell's (a,b) — the latter is ambiguous near the grey axis / at
+  // L≈0/1, giving a wrong band. Matches the late re-assert pass.
+  float hueT = atan(lab2.z, lab2.y) / (2.0 * PI) + 0.5;
   vec4 envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
   float envLLo = envHue.r, envLHi = envHue.g;
   float envCLo = envHue.b, envCHi = envHue.a;
@@ -2373,11 +2431,12 @@ void main(){
   const float C_SKIRT = 0.04;
   float lHi = envLHi + uLExtHi;
   float lLo = envLLo - uLExtLo;
-  // Soft skirt — values past the bound compress asymptotically (slight
-  // overshoot OK). Monotonic luma ordering up the column is enforced later by
-  // the luma-order pass, so the skirt can't cause a reversal.
+  // COMPRESS the out-of-band luma into a skirt of width L_SKIRT — monotonic in
+  // lab2.x, so input-luma ORDERING is preserved and below-floor cells stay
+  // BELOW the floor (no overbrightening of dark/tannish interpolated cells);
+  // above-ceil stay above. The whole outside range squeezes into ±L_SKIRT.
   if (lab2.x > lHi){ float over = lab2.x - lHi; lab2.x = lHi + L_SKIRT * (1.0 - exp(-over / L_SKIRT)); }
-  if (lab2.x < lLo){ float under = lLo - lab2.x; lab2.x = lLo - L_SKIRT * (1.0 - exp(-under / L_SKIRT)); }
+  else if (lab2.x < lLo){ float under = lLo - lab2.x; lab2.x = lLo - L_SKIRT * (1.0 - exp(-under / L_SKIRT)); }
   float outC = length(lab2.yz);
   float cHi = envCHi + uCExtHi;
   // Chroma FLOOR — a minimum saturation that PEAKS at mid-L and tapers to 0 at
@@ -2499,9 +2558,9 @@ void main(){
   }
   // Fade the gate off near the grey axis (unreliable cell hue → atan
   // singularity → pinwheel feathering); engage only where chroma is meaningful.
-  float hgConf = smoothstep(0.01, 0.05, sqrt(cellC2));
+  float hgConf = smoothstep(0.0, 0.10, sqrt(cellC2));
   hueGateMult  = mix(1.0, hueGateMult, hgConf);
-  float chromaGate = mix(smoothstep(0.002, 0.025, sqrt(cellC2)), 1.0, uChromaGate);
+  float chromaGate = mix(smoothstep(0.0, 0.06, sqrt(cellC2)), 1.0, uChromaGate);
   // No lumaTrust fade — keep chroma at the L extremes (no grey-out near ceil/floor).
   v.gb *= hueGateMult * chromaGate;
   // Final taper: mix between the (chroma-preserved, safety-netted) blur output
@@ -3037,6 +3096,9 @@ function loadDefaultImage(){
 function loadHueImage(){
   installCanvas(makeHuePickerImage(), 'synthetic · hue picker', _cred(null, 'app'));
 }
+function loadChromaRampImage(){
+  installCanvas(makeChromaRampImage(), 'synthetic · chroma ramp', _cred(null, 'app'));
+}
 function loadLandscapeImage(){
   installCanvas(makeLandscapeImage(), 'synthetic · landscape', _cred(null, 'app'));
 }
@@ -3163,6 +3225,40 @@ function buildHuePreviewSrc(){
   return _smoothHueRing(buf, W, H, 4);
 }
 
+// Chroma ramp: x = hue (atan2 sweep), y = chroma (top = max → bottom = grey),
+// at a FIXED mid L. Companion to the hue picker (which ramps L) — lets the
+// step-2 chroma envelope be read off directly (the high-chroma top clamps).
+function _fillChromaRamp(W, H, d){
+  const L = 0.65, Cmax = 0.30;
+  for (let y = 0; y < H; y++){
+    const C = (1 - y / (H - 1)) * Cmax;
+    for (let x = 0; x < W; x++){
+      const h   = (x / (W - 1)) * 2 * Math.PI - Math.PI;
+      const lin = oklabToLinearJS(L, C * Math.cos(h), C * Math.sin(h));
+      const i = (y * W + x) * 4;
+      d[i]   = Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[0]))) * 255);
+      d[i+1] = Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[1]))) * 255);
+      d[i+2] = Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[2]))) * 255);
+      d[i+3] = 255;
+    }
+  }
+}
+function buildChromaRampSrc(){
+  const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
+  const d = new Uint8ClampedArray(W * H * 4);
+  _fillChromaRamp(W, H, d);
+  return d;
+}
+function makeChromaRampImage(){
+  const W = 720, H = 460;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  _fillChromaRamp(W, H, img.data);
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 // One-time GPU resources for the GPU-rendered hues preview: the hue picker
 // source as a 2D texture, an offscreen RGBA8 render target + FBO at preview
 // size, and a CPU-side readback buffer.
@@ -3196,6 +3292,19 @@ function _ensureHuePreviewGpu(){
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.huePreviewOutTex, 0);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   state.huePreviewBuf = new Uint8Array(W * H * 4);
+  // Second source: the chroma ramp (shares the render target / readback buffer).
+  const cCv = document.createElement('canvas'); cCv.width = W; cCv.height = H;
+  const cCtx = cCv.getContext('2d');
+  const cImg = cCtx.createImageData(W, H);
+  cImg.data.set(buildChromaRampSrc());
+  cCtx.putImageData(cImg, 0, 0);
+  state.chromaPreviewTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, state.chromaPreviewTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cCv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 }
 
 // Refresh all inline stage previews + the LUT slice. Each stage strip renders
@@ -3207,6 +3316,7 @@ function _ensureHuePreviewGpu(){
 function renderHuePreview(){
   renderStagePreview('step1Preview', state.lutTexStep1, 1.0, false);
   renderStagePreview('step2Preview', state.lutTexStep2, 1.0, true);
+  renderStagePreview('step2cPreview', state.lutTexStep2, 1.0, false, state.chromaPreviewTex);
   renderStagePreview('step3Preview', state.lutTex, state.params.lutStrength, false);
   renderLutSlicePreview();
 }
@@ -3216,7 +3326,7 @@ function renderHuePreview(){
 // so callers can sample rendered pixels (e.g. anchor-marker fills). Shared by
 // the three inline stage previews (lutTexStep1 / lutTexStep2 / lutTex) —
 // one code path, no CPU re-derivation.
-function _renderHueThroughLut(ctx, lutTex, strength){
+function _renderHueThroughLut(ctx, lutTex, strength, srcTex){
   const gl = state.gl;
   const W = HUE_PREVIEW_W, H = HUE_PREVIEW_H;
   _ensureHuePreviewGpu();
@@ -3226,7 +3336,7 @@ function _renderHueThroughLut(ctx, lutTex, strength){
   gl.bindFramebuffer(gl.FRAMEBUFFER, state.huePreviewFbo);
   gl.viewport(0, 0, W, H);
   gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, state.huePreviewTex);
+  gl.bindTexture(gl.TEXTURE_2D, srcTex || state.huePreviewTex);
   gl.uniform1i(gl.getUniformLocation(prog, 'uImg'), 0);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lutTex);
@@ -3261,111 +3371,120 @@ function _renderHueThroughLut(ctx, lutTex, strength){
 function _overlayHueEnvelope(ctx, W, H){
   const curve = state.hueLCCurve;
   if (!curve || !state.params.debugEnvVizL) return;
-  // Value = relaxedness = the extension amount directly (1 = no limit).
-  const lExtLo = state.params.lExtLo;
-  const lExtHi = state.params.lExtHi;
+  // Floor = BLUE, ceil = RED. Pale (babyblue/babyrose) = the base anchor band;
+  // saturated = the EFFECTIVE clamp (band ∓ lExt), which tracks the sliders.
+  // Drawn as stroked polylines (smooth curve, not dotted).
+  const lExtLo = state.params.lExtLo, lExtHi = state.params.lExtHi;
   const BINS = HUE_ENV_BINS;
-  function sampleEnv(x){
-    // Image x represents compass hue ((x/W) × 360°). The curve is indexed by
-    // atan2 hue ([-π, π)), with bin 0 centered at atan2 ≈ -π+π/BINS. To
-    // sample the right bin at this image hue, shift compass by +0.5 turn
-    // (= 180° = π) so hueT matches the texture coordinate convention.
+  function band(x){
     const compassT = (x + 0.5) / W;
     const hueT     = (compassT + 0.5) % 1;       // align compass → atan2
-    const f        = hueT * BINS - 0.5;          // bin centers
-    const i0       = ((Math.floor(f) % BINS) + BINS) % BINS;
-    const i1       = (i0 + 1) % BINS;
-    const u        = f - Math.floor(f);
-    const lLo = curve[i0*4+0] * (1 - u) + curve[i1*4+0] * u;
-    const lHi = curve[i0*4+1] * (1 - u) + curve[i1*4+1] * u;
-    return [
-      Math.max(0, lLo - lExtLo),
-      Math.min(1, lHi + lExtHi),
-    ];
-  }
-  // L bounds: floor = black, ceil = white. A side fully relaxed (≥1) is a
-  // noop → hide that line.
-  const floorOn = lExtLo < 1;
-  const ceilOn  = lExtHi < 1;
-  ctx.save();
-  for (let x = 0; x < W; x++){
-    const [lo, hi] = sampleEnv(x);
-    if (floorOn){
-      ctx.fillStyle = 'rgba(0,0,0,0.9)';
-      const yLo = Math.max(0, Math.min(H - 1, Math.round((1 - lo) * (H - 1))));
-      ctx.fillRect(x, yLo, 1, 1);
-    }
-    if (ceilOn){
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      const yHi = Math.max(0, Math.min(H - 1, Math.round((1 - hi) * (H - 1))));
-      ctx.fillRect(x, yHi, 1, 1);
-    }
-  }
-  ctx.restore();
-  _overlayHueCEnvelope(ctx, W, H);
-}
-
-// Per-(x,y) chroma of the source hue picker, cached so the C envelope
-// overlay isn't paying ~20k rgbToOklab calls per refresh.
-let _huePreviewChroma = null;
-function _ensureHuePreviewChroma(W, H){
-  if (_huePreviewChroma && _huePreviewChroma.length === W * H) return;
-  if (!_huePreviewSrc) _huePreviewSrc = buildHuePreviewSrc();
-  const src = _huePreviewSrc;
-  const out = new Float32Array(W * H);
-  for (let y = 0; y < H; y++){
-    for (let x = 0; x < W; x++){
-      const o = (y * W + x) * 4;
-      const lab = rgbToOklab(src[o] / 255, src[o + 1] / 255, src[o + 2] / 255);
-      out[y * W + x] = Math.hypot(lab[1], lab[2]);
-    }
-  }
-  _huePreviewChroma = out;
-}
-
-// Chroma envelope contours on the hue preview: at each x (hue), trace the y(L)
-// positions where the source's chroma crosses the per-hue C floor / ceil bound
-// (the strip's y-axis is L, not C, so a chroma bound shows as a contour line —
-// typically 0–2 crossings per column). Floor (cLo) = red, ceil (cHi) = blue.
-// Value = relaxedness, used directly as the extension (matches the shader):
-// cExt 1 = that side off, 0 = clamp at the curve. envCLo is usually ~0, so the
-// floor contour sits near the grey rows.
-function _overlayHueCEnvelope(ctx, W, H){
-  const curve = state.hueLCCurve;
-  if (!curve || !state.params.debugEnvVizC) return;
-  const BINS = HUE_ENV_BINS;
-  _ensureHuePreviewChroma(W, H);
-  const chroma = _huePreviewChroma;
-  function sampleBound(x, idx, extAbs, clampLo){
-    const compassT = (x + 0.5) / W;
-    const hueT     = (compassT + 0.5) % 1;
     const f        = hueT * BINS - 0.5;
     const i0       = ((Math.floor(f) % BINS) + BINS) % BINS;
     const i1       = (i0 + 1) % BINS;
     const u        = f - Math.floor(f);
-    let cap = curve[i0*4+idx] * (1 - u) + curve[i1*4+idx] * u + extAbs;
-    return clampLo ? Math.max(0, cap) : cap;
+    return [curve[i0*4+0] * (1 - u) + curve[i1*4+0] * u,
+            curve[i0*4+1] * (1 - u) + curve[i1*4+1] * u];
   }
-  function drawContour(idx, extAbs, clampLo, color){
-    ctx.fillStyle = color;
-    for (let x = 0; x < W; x++){
-      const cap = sampleBound(x, idx, extAbs, clampLo);
-      let prev = chroma[x];
-      for (let y = 1; y < H; y++){
-        const c = chroma[y * W + x];
-        if ((prev <= cap) !== (c <= cap)){
-          const t = (cap - prev) / (c - prev);
-          const yc = Math.max(0, Math.min(H - 1, Math.round((y - 1) + t)));
-          ctx.fillRect(x, yc, 1, 1);
-        }
-        prev = c;
-      }
-    }
-  }
+  const yOf = v => (1 - Math.max(0, Math.min(1, v))) * (H - 1);
+  const stroke = (yFn, color) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = 0; x < W; x++){ const y = yFn(x); if (x === 0) ctx.moveTo(0.5, y); else ctx.lineTo(x + 0.5, y); }
+    ctx.stroke();
+  };
   ctx.save();
-  // ceil cHi (curve idx 3) = blue; floor cLo (idx 2) = red. Side off at ext ≥ 1.
-  if (state.params.cExtHi < 1) drawContour(3,  state.params.cExtHi * LUT_AB_RANGE, false, 'rgba(80,150,255,0.9)');
-  if (state.params.cExtLo < 1) drawContour(2, -state.params.cExtLo * LUT_AB_RANGE, true,  'rgba(255,80,80,0.9)');
+  stroke(x => yOf(band(x)[0]),          'rgba(95,160,225,0.7)');  // floor base = babyblue
+  stroke(x => yOf(band(x)[0] - lExtLo), 'rgba(60,140,255,0.95)');  // floor eff  = blue
+  stroke(x => yOf(band(x)[1]),          'rgba(225,115,135,0.7)');  // ceil base  = babyrose
+  stroke(x => yOf(band(x)[1] + lExtHi), 'rgba(255,70,70,0.95)');   // ceil eff   = red
+  ctx.restore();
+}
+
+// Chroma envelope rings on the LUT slice (a/b plane). The per-hue ANCHOR chroma
+// band traces two concentric rings: floor cLo (red, inner) and ceil cHi (blue,
+// outer). Always shown (the envelope itself); the cExt sliders relax the actual
+// clamp outward from here. Natural on the slice — a chroma bound IS a radius.
+function _overlaySliceCEnvelope(ctx, W, H){
+  const curve = state.hueLCCurve;
+  if (!curve) return;
+  const BINS = HUE_ENV_BINS, R = LUT_AB_RANGE, STEPS = 192;
+  const L = Math.max(0, Math.min(1, state.params.lutSliceL));
+  let lW = 4 * L * (1 - L); lW = lW * lW * lW;
+  const cExtLo = state.params.cExtLo, cExtHi = state.params.cExtHi;
+  const env = (idx, hueT) => {
+    const f = hueT * BINS - 0.5;
+    const i0 = ((Math.floor(f) % BINS) + BINS) % BINS, i1 = (i0 + 1) % BINS;
+    const u = f - Math.floor(f);
+    return curve[i0*4+idx] * (1 - u) + curve[i1*4+idx] * u;
+  };
+  const px = (a, b) => [((a + R) / (2 * R)) * (W - 1), ((-b + R) / (2 * R)) * (H - 1)];
+  // CHROMA envelope (debugEnvVizC) — floor (cLo) = BLUE, ceil (cHi) = RED.
+  // Pale = base anchor band, saturated = effective (tracks cExt). At this L.
+  if (state.params.debugEnvVizC){
+    const ring = (cOf, color) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath();
+      for (let k = 0; k <= STEPS; k++){
+        const th = -Math.PI + (k / STEPS) * 2 * Math.PI, hueT = th / (2 * Math.PI) + 0.5;
+        const c = Math.max(0, cOf(hueT));
+        const [x, y] = px(c * Math.cos(th), c * Math.sin(th));
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+    ctx.save();
+    ring(hueT => env(3, hueT) * lW,                'rgba(95,160,225,0.7)');  // floor base = babyblue
+    ring(hueT => (1 - cExtLo) * env(3, hueT) * lW, 'rgba(60,140,255,0.95)');  // floor eff  = blue
+    ring(hueT => env(3, hueT),                     'rgba(225,115,135,0.7)');  // ceil base  = babyrose
+    ring(hueT => env(3, hueT) + cExtHi * R,        'rgba(255,70,70,0.95)');   // ceil eff   = red
+    ctx.restore();
+  }
+  // LUMA envelope (debugEnvVizL) — rim ticks per hue marking where this slice's
+  // L falls OUTSIDE the per-hue L band: BLUE = below floor, RED = above ceil.
+  if (state.params.debugEnvVizL){
+    ctx.save();
+    for (let k = 0; k < STEPS; k++){
+      const th = -Math.PI + ((k + 0.5) / STEPS) * 2 * Math.PI, hueT = th / (2 * Math.PI) + 0.5;
+      const lLo = env(0, hueT) - state.params.lExtLo, lHi = env(1, hueT) + state.params.lExtHi;
+      let col = null;
+      if (L < lLo) col = 'rgba(60,140,255,0.9)';
+      else if (L > lHi) col = 'rgba(255,70,70,0.9)';
+      if (!col) continue;
+      const [x, y] = px(R * Math.cos(th), R * Math.sin(th));
+      ctx.fillStyle = col;
+      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
+    }
+    ctx.restore();
+  }
+}
+
+// Chroma envelope on the chroma-ramp preview (hue × chroma at fixed L=0.65):
+// effective ceil (blue) + floor (red) horizontal lines per hue, dim grey = base
+// anchor chroma ceil. Mirrors the L envelope on the hue×L preview.
+function _overlayChromaRampEnvelope(ctx, W, H){
+  const curve = state.hueLCCurve;
+  if (!curve || !state.params.debugEnvVizC) return;
+  const BINS = HUE_ENV_BINS, Cmax = 0.30, R = LUT_AB_RANGE, L = 0.65;
+  let lW = 4 * L * (1 - L); lW = lW * lW * lW;
+  const cExtLo = state.params.cExtLo, cExtHi = state.params.cExtHi;
+  const envCHi = x => {
+    const hueT = x / (W - 1), f = hueT * BINS - 0.5;
+    const i0 = ((Math.floor(f) % BINS) + BINS) % BINS, i1 = (i0 + 1) % BINS;
+    const u = f - Math.floor(f);
+    return curve[i0*4+3] * (1 - u) + curve[i1*4+3] * u;
+  };
+  const yOf = c => (1 - Math.max(0, Math.min(1, c / Cmax))) * (H - 1);
+  const stroke = (cFn, color) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = 0; x < W; x++){ const y = yOf(cFn(x)); if (x === 0) ctx.moveTo(0.5, y); else ctx.lineTo(x + 0.5, y); }
+    ctx.stroke();
+  };
+  // floor (cLo) = BLUE, ceil (cHi) = RED. Pale = base anchor band, saturated =
+  // effective (tracks cExt). Stroked → smooth curve.
+  ctx.save();
+  stroke(x => envCHi(x) * lW,                 'rgba(95,160,225,0.7)');  // floor base = babyblue
+  stroke(x => (1 - cExtLo) * envCHi(x) * lW,  'rgba(60,140,255,0.95)');  // floor eff  = blue
+  stroke(x => envCHi(x),                      'rgba(225,115,135,0.7)');  // ceil base  = babyrose
+  stroke(x => envCHi(x) + cExtHi * R,         'rgba(255,70,70,0.95)');   // ceil eff   = red
   ctx.restore();
 }
 
@@ -3394,7 +3513,7 @@ function _drawAnchorDot(ctx, cx, cy, L, a, b, r){
 //   step 1 ← lutTexStep1 (IDW core)          @ 1.0
 //   step 2 ← lutTexStep2 (after preserve + envelope)  @ 1.0
 //   step 3 ← lutTex      (final, incl. blur/reach/luma-look) @ lutStrength
-function renderStagePreview(canvasId, lutTex, strength, drawEnvelope){
+function renderStagePreview(canvasId, lutTex, strength, drawEnvelope, srcTex){
   const cv = document.getElementById(canvasId);
   if (!cv) return;
   const ctx = cv.getContext('2d');
@@ -3407,8 +3526,12 @@ function renderStagePreview(canvasId, lutTex, strength, drawEnvelope){
     ctx.putImageData(img, 0, 0);
     return;
   }
-  const dst = _renderHueThroughLut(ctx, lutTex, strength);
+  const dst = _renderHueThroughLut(ctx, lutTex, strength, srcTex);
   if (drawEnvelope) _overlayHueEnvelope(ctx, W, H);
+  // Chroma-ramp source: draw the CHROMA envelope (its y-axis is chroma), then
+  // stop — anchor markers/L overlay assume a hue×L strip and would be misplaced.
+  if (srcTex === state.chromaPreviewTex){ _overlayChromaRampEnvelope(ctx, W, H); return; }
+  if (srcTex) return;
   // Anchor markers: x ← hue (0..360°), y ← L (top = bright, bot = dark).
   // Fill = the stage result sampled at that pixel (dot blends with the output
   // beneath it); a thin ring of the anchor's true sRGB keeps its hue legible.
@@ -3504,6 +3627,7 @@ function renderLutSlicePreview(){
     dst.set(src.subarray(srcRow, srcRow + W * 4), dstRow);
   }
   ctx.putImageData(img, 0, 0);
+  // (Envelope overlays live on the step-2 / chroma previews, not the slice.)
   // Anchor markers — dot size shrinks with L distance from the slice so the
   // user can see which anchors are most influential at this depth. Outer
   // ring = anchor's true sRGB; inner fill = sampled IDW result at the marker
@@ -3843,6 +3967,7 @@ function init(){
     document.getElementById(id).addEventListener('click', () => { setSelectedImageBtn(id); loader(); });
   }
   bindImageBtn('hueImage',       loadHueImage);
+  bindImageBtn('chromaRampImage', loadChromaRampImage);
   bindImageBtn('resetImage',     loadDefaultImage);
   bindImageBtn('landscapeImage', loadLandscapeImage);
   bindImageBtn('portraitImage',  loadPortraitImage);
@@ -4004,22 +4129,22 @@ function init(){
   }
   bindBaryTriangle('triLuma', 'wLuma');
   bindBaryTriangle('triHue',  'wHue');
-  // Softness slider is inverted vs. its internal IDW exponent: slider position
-  // = 13 − exponent. So high slider = mushy/soft, low = hard nearest. Keeps the
-  // intuition "softness 12 means very soft" while the math stays sensible.
+  // Softness slider is rescaled to [0, 1] (high = softer, low = harder
+  // Voronoi snap). Internal IDW exponent = 8 − slider*7, so slider 0 → exp 8
+  // (hard), slider 1 → exp 1 (near identity), slider 0.5 → exp 4.5 (balanced).
   (function bindSoftnessSlider(){
     const inp = document.getElementById('softness');
     const lbl = document.getElementById('vSoftness');
     const sync = () => {
-      const slider = 11 - state.params.softness;
-      inp.value = slider.toFixed(1);
-      lbl.textContent = slider.toFixed(1);
+      const slider = (8 - state.params.softness) / 7;
+      inp.value = slider.toFixed(2);
+      lbl.textContent = slider.toFixed(2);
     };
     sync();
     inp.addEventListener('input', () => {
       const slider = parseFloat(inp.value);
-      state.params.softness = 11 - slider;
-      lbl.textContent = slider.toFixed(1);
+      state.params.softness = 8 - slider * 7;
+      lbl.textContent = slider.toFixed(2);
       clearActivePreset();
       scheduleLutRebuild();
     });
@@ -4077,12 +4202,8 @@ function init(){
   // draw on the previews → just re-render them.
   bindLutSlider('stampStrength', 'vStampStrength', 'stampStrength', v => v.toFixed(2));
   bindLutSlider('chromaGate', 'vChromaGate', 'chromaGate', v => v.toFixed(2));
-  for (const id of ['debugEnvVizL', 'debugEnvVizC']){
-    const el = document.getElementById(id);
-    if (!el) continue;
-    el.checked = state.params[id];
-    el.addEventListener('change', () => { state.params[id] = el.checked; renderHuePreview(); });
-  }
+  // Envelope viz toggles removed: state.params.debugEnvVizL / debugEnvVizC
+  // stay hardcoded to true in defaults so the rendering gates always pass.
   // Debug: which stage LUT drives the test image. Just re-renders (LUTs for all
   // stages are already built) — no rebuild, no preset clear.
   (() => {
@@ -4118,14 +4239,18 @@ function init(){
   const lutPresets = {
     // Three presets that differ ONLY by softness. Stored as IDW Shepard
     // exponent (state.params.softness); slider DISPLAY value = 11 − exponent.
-    //   soft     → display 8 (max — gentlest IDW), exponent 3
-    //   balanced → display 6 (middle),             exponent 5
-    //   hard     → display 3 (Voronoi snap),       exponent 8
-    // All other params identical: hueGate 0.5, preserve 0.5, envelope fully
-    // relaxed, late stages same. (Triangles aren't preset-driven.)
-    'soft':     { hueGate: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'balanced': { hueGate: 0.5, softness: 5.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'hard':     { hueGate: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    //   soft     → display 8   (gentlest IDW), exponent 3
+    //   balanced → display 6.5 (middle),       exponent 4.5
+    //   hard     → display 3   (Voronoi snap), exponent 8
+    // All other params identical: hueGate 0.5, preserve 0.5, envelope at 0.5,
+    // late stages same. (Triangles aren't preset-driven.)
+    'soft':     { hueGate: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
+    'balanced': { hueGate: 0.5, softness: 4.5, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
+    'hard':     { hueGate: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
+    // 'tone' = recolour preset: luma sticks to source brightness (wLuma at L
+    // vertex), colour blend ignores luma (wHue split between C and H). Other
+    // params inherit balanced settings.
+    'tone':     { hueGate: 0.5, softness: 4.5, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25, wLuma: [1.0, 0.0, 0.0], wHue: [0.0, 0.5, 0.5] },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
@@ -4172,6 +4297,11 @@ function init(){
     const p = lutPresets[name];
     if (!p) return;
     Object.assign(state.params, p);
+    // wLuma / wHue are arrays — clone so dragging the pin doesn't mutate the
+    // preset literal. Reset to triangle centroid when the preset omits them.
+    state.params.wLuma = Array.isArray(p.wLuma) ? p.wLuma.slice() : [1/3, 1/3, 1/3];
+    state.params.wHue  = Array.isArray(p.wHue)  ? p.wHue.slice()  : [1/3, 1/3, 1/3];
+    triRedraws.forEach(f => f());
     setActivePreset(name);
     for (const [k, [inp, lbl, fmt]] of Object.entries(sliderMap)){
       if (state.params[k] === undefined) continue;
@@ -4180,12 +4310,12 @@ function init(){
       inpEl.value = state.params[k];
       lblEl.textContent = fmt(state.params[k]);
     }
-    // Softness slider inverts (slider = 13 − exponent).
+    // Softness slider rescaled to [0, 1]: slider = (8 − exponent) / 7.
     if (state.params.softness !== undefined){
-      const sftSlider = 11 - state.params.softness;
+      const sftSlider = (8 - state.params.softness) / 7;
       const sftEl = document.getElementById('softness'), sftLbl = document.getElementById('vSoftness');
-      if (sftEl)  sftEl.value = sftSlider.toFixed(1);
-      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(1);
+      if (sftEl)  sftEl.value = sftSlider.toFixed(2);
+      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(2);
     }
     refreshDualRanges();
     scheduleLutRebuild();
@@ -4213,8 +4343,8 @@ function init(){
     'smoothness', 'reach', 'lumaLook',
     // Final per-pixel
     'lutStrength',
-    // Anchor stamp + debug overlays
-    'stampStrength', 'debugEnvVizL', 'debugEnvVizC',
+    // Anchor stamp
+    'stampStrength',
   ];
   function serializeLutPreset(){
     const out = {};
@@ -4242,21 +4372,13 @@ function init(){
       lblEl.textContent = fmt(state.params[k]);
     }
     if (state.params.softness !== undefined){
-      const sftSlider = 11 - state.params.softness;
+      const sftSlider = (8 - state.params.softness) / 7;
       const sftEl = document.getElementById('softness'), sftLbl = document.getElementById('vSoftness');
-      if (sftEl)  sftEl.value = sftSlider.toFixed(1);
-      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(1);
+      if (sftEl)  sftEl.value = sftSlider.toFixed(2);
+      if (sftLbl) sftLbl.textContent = sftSlider.toFixed(2);
     }
     refreshDualRanges();
     triRedraws.forEach(fn => fn());   // redraw the L/a/b weight triangles
-    // Refresh debug-stage toggles
-    const toggleIds = [
-      'debugEnvVizL', 'debugEnvVizC',
-    ];
-    for (const id of toggleIds){
-      const el = document.getElementById(id);
-      if (el && state.params[id] !== undefined) el.checked = !!state.params[id];
-    }
     // Refresh lumaLook label (separate IIFE binding)
     const lookLbl = document.getElementById('vLumaLook');
     if (lookLbl) lookLbl.textContent = (state.params.lumaLook || 0).toFixed(2);
