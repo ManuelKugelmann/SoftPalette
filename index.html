@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T15:33:47Z">
+<meta name="build" content="2026-06-11T15:55:45Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -239,7 +239,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-11T15:33:47Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-11T15:55:45Z</span>
   </div>
 </header>
 
@@ -2166,12 +2166,6 @@ uniform float uChromaGate;   // 1 = fade near-grey texels toward grey (safety
                               // net); 0 = keep their chroma (toggle off).
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
 
-// Soft min/max: smooth analytic alternatives to min()/max() so the envelope
-// clamp doesn't create a visible step where the input crosses the bound.
-// k → 0 reproduces the hard version; k > 0 widens the transition band.
-float softMax(float x, float m, float k){ return 0.5 * (x + m + sqrt((x - m) * (x - m) + k * k)); }
-float softMin(float x, float m, float k){ return 0.5 * (x + m - sqrt((x - m) * (x - m) + k * k)); }
-
 // L/C/H squared-distance components from cell (L, cab) to anchor s, each
 // normalized so the three axes are comparable before the barycentric L/C/H
 // weighting. Chroma/Hue come from PROJECTING onto the ANCHOR's hue axis (which
@@ -3319,63 +3313,6 @@ function _overlayHueEnvelope(ctx, W, H){
   stroke(x => yOf(band(x)[1]),          'rgba(225,115,135,0.7)');  // ceil base  = babyrose
   stroke(x => yOf(band(x)[1] + lExtHi), 'rgba(255,70,70,0.95)');   // ceil eff   = red
   ctx.restore();
-}
-
-// Chroma envelope rings on the LUT slice (a/b plane). The per-hue ANCHOR chroma
-// band traces two concentric rings: floor cLo (red, inner) and ceil cHi (blue,
-// outer). Always shown (the envelope itself); the cExt sliders relax the actual
-// clamp outward from here. Natural on the slice — a chroma bound IS a radius.
-function _overlaySliceCEnvelope(ctx, W, H){
-  const curve = state.hueLCCurve;
-  if (!curve) return;
-  const BINS = HUE_ENV_BINS, R = LUT_AB_RANGE, STEPS = 192;
-  const L = Math.max(0, Math.min(1, state.params.lutSliceL));
-  let lW = 4 * L * (1 - L); lW = lW * lW * lW;
-  const cExtLo = state.params.cExtLo, cExtHi = state.params.cExtHi;
-  const env = (idx, hueT) => {
-    const f = hueT * BINS - 0.5;
-    const i0 = ((Math.floor(f) % BINS) + BINS) % BINS, i1 = (i0 + 1) % BINS;
-    const u = f - Math.floor(f);
-    return curve[i0*4+idx] * (1 - u) + curve[i1*4+idx] * u;
-  };
-  const px = (a, b) => [((a + R) / (2 * R)) * (W - 1), ((-b + R) / (2 * R)) * (H - 1)];
-  // CHROMA envelope (debugEnvVizC) — floor (cLo) = BLUE, ceil (cHi) = RED.
-  // Pale = base anchor band, saturated = effective (tracks cExt). At this L.
-  if (state.params.debugEnvVizC){
-    const ring = (cOf, color) => {
-      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath();
-      for (let k = 0; k <= STEPS; k++){
-        const th = -Math.PI + (k / STEPS) * 2 * Math.PI, hueT = th / (2 * Math.PI) + 0.5;
-        const c = Math.max(0, cOf(hueT));
-        const [x, y] = px(c * Math.cos(th), c * Math.sin(th));
-        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    };
-    ctx.save();
-    ring(hueT => env(3, hueT) * lW,                'rgba(95,160,225,0.7)');  // floor base = babyblue
-    ring(hueT => (1 - cExtLo) * env(3, hueT) * lW, 'rgba(60,140,255,0.95)');  // floor eff  = blue
-    ring(hueT => env(3, hueT),                     'rgba(225,115,135,0.7)');  // ceil base  = babyrose
-    ring(hueT => env(3, hueT) + cExtHi * R,        'rgba(255,70,70,0.95)');   // ceil eff   = red
-    ctx.restore();
-  }
-  // LUMA envelope (debugEnvVizL) — rim ticks per hue marking where this slice's
-  // L falls OUTSIDE the per-hue L band: BLUE = below floor, RED = above ceil.
-  if (state.params.debugEnvVizL){
-    ctx.save();
-    for (let k = 0; k < STEPS; k++){
-      const th = -Math.PI + ((k + 0.5) / STEPS) * 2 * Math.PI, hueT = th / (2 * Math.PI) + 0.5;
-      const lLo = env(0, hueT) - state.params.lExtLo, lHi = env(1, hueT) + state.params.lExtHi;
-      let col = null;
-      if (L < lLo) col = 'rgba(60,140,255,0.9)';
-      else if (L > lHi) col = 'rgba(255,70,70,0.9)';
-      if (!col) continue;
-      const [x, y] = px(R * Math.cos(th), R * Math.sin(th));
-      ctx.fillStyle = col;
-      ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
-    }
-    ctx.restore();
-  }
 }
 
 // Chroma envelope on the chroma-ramp preview (hue × chroma at fixed L=0.65):
