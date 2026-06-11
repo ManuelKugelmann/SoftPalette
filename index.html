@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T07:44:46Z">
+<meta name="build" content="2026-06-11T08:56:01Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-11T07:44:46Z</span>
+    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-11T08:56:01Z</span>
   </div>
 </header>
 
@@ -276,10 +276,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   </section>
 
   <section class="card" data-collapsed-default="true">
-    <h2>extend palette</h2>
+    <h2>auto extend palette</h2>
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
       <input type="checkbox" id="extendPalette">
-      <span>auto-extend <span style="color:var(--txdd)">0 = off</span></span>
+      <span id="extendPaletteLabel">off</span>
     </label>
     <div class="slider" id="extendHWrap" style="margin-top:8px">
       <div class="lbl"><span>hue gap</span><span class="v" id="vExtendH">6.28</span></div>
@@ -355,11 +355,15 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
       <div class="slider">
         <div class="lbl"><span>lut size</span><span class="v" id="vLutSize">33³</span></div>
-        <input type="range" id="lutSize" min="0" max="4" step="1" value="1">
+        <input type="range" id="lutSize" min="0" max="3" step="1" value="1">
       </div>
       <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>hue gate</span><span class="v" id="vHueGate">0.50</span></div>
         <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Opposing-hue safety net (build + blur). 0 = kill any hue 90°+ off the cell's identity; 1 = only the exact opposite.">
+      </div>
+      <div class="slider" style="margin-top:6px" title="Fade near-grey texels toward grey (build + blur safety net). 1 = full desat; 0 = keep their chroma (no white/black grey-axis wash).">
+        <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">1.00</span></div>
+        <input type="range" id="chromaGate" min="0" max="1" step="0.01" value="1.0">
       </div>
     </div>
     <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
@@ -378,9 +382,13 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="lbl"><span>anchor hue range</span><span class="v" id="vHRange">0.50</span></div>
       <input type="range" id="hRange" min="0.25" max="1" step="0.01" value="0.50">
     </div>
+    <div class="slider" style="margin-top:6px" title="How much the hue/chroma blend follows luma (luma always uses full L). Low = hue borrowed across all L — keeps colour at extreme L, decouples hue from the luma steps; high = hue tied to luma.">
+      <div class="lbl"><span>hue luma balance</span><span class="v" id="vHueLWeight">0.35</span></div>
+      <input type="range" id="hueLWeight" min="0" max="1" step="0.01" value="0.35">
+    </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">7.0</span></div>
-      <input type="range" id="softness" min="3" max="10" step="0.1" value="7.0">
+      <input type="range" id="softness" min="1" max="8" step="0.1" value="7.0">
     </div>
 
     <!-- step 1 preview — IDW core (lutTexStep1), before preserve+envelope. -->
@@ -503,7 +511,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 const MAX_PAL = 256;
 const MAX_DIM = 2048;
 // Selectable LUT cube sizes. Odd values keep the neutral grey axis cell-centered.
-const LUT_SIZES = [17, 33, 65, 129, 257];
+// 257³ removed: at RGBA16F × ~5 LUT textures it pins ≈ 680 MB on the GPU,
+// reliably trips a context-lost on integrated / mid-range cards. 129³ ≈ 86 MB
+// is the largest size that consistently fits.
+const LUT_SIZES = [17, 33, 65, 129];
 const LUT_AB_RANGE = 0.4;        // OkLab (a,b) span: [-0.4, 0.4]
 
 const PRESETS = {
@@ -631,11 +642,17 @@ const state = {
     abRange: 0.5,          // anchor chroma range — σab on (a, b) axes. UI [0.25, 1].
     hRange: 0.5,           // anchor hue range — Gaussian gate σ (rad). UI [0.25, 1].
     softness: 4,           // IDW power exponent; 1 = linear, 10 = hard nearest.
+    hueLWeight: 0.35,      // L weight in the HUE/chroma blend metric (luma uses
+                           // full L). Low = hue borrowed across all L (colour kept
+                           // at extreme L); high = hue tied to L like luma. UI [0,1].
     // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
     hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
                            // texel's identity Hue. 0 = full gate (anti-aligned
                            // → grey), 1 = no gate. Applied in FS_LUT_BUILD (step
                            // 1) AND FS_LUT_BLUR (step 3) after the chroma rescale.
+    chromaGate: 1.0,      // GLOBAL safety-net STRENGTH: fade near-grey texels
+                           // toward grey (FS_LUT_BUILD + FS_LUT_BLUR). 1 = full
+                           // desat; 0 = keep their chroma (no white/black wash).
 
     // Texel→identity-LUT blend (applied inside FS_LUT_BUILD with anchor
     // coherence gate; 0 = full LUT effect, 1 = passthrough identity).
@@ -1250,35 +1267,10 @@ function paletteSeeds(){
     }, tolL);
   }
 
-  // --- Whitepoint / blackpoint extension: if the palette doesn't reach near
-  // L=0 or near L=1 AND lumaLook>0, insert a tinted synth anchor at the
-  // missing extreme. Synth uses the curve's FULL chroma (not scaled by
-  // lumaLook — that previously made the synth near-grey at moderate
-  // lumaLook, dragging dark inputs to pastel grey). lumaLook now controls
-  // the synth's IDW strength instead, so low lumaLook = weak influence,
-  // high lumaLook = strong, but in both cases the tint magnitude stays at
-  // the palette's natural extreme-cluster chroma.
-  if (lumaCurve && par.lumaLook > 0 && out.length < MAX_PAL){
-    const Ls = out.map(s => s.L);
-    const minL = Math.min(...Ls), maxL = Math.max(...Ls);
-    function curveAt(L){
-      const f = Math.max(0, Math.min(1, L)) * (LUMA_BINS - 1);
-      const i0 = Math.floor(f), i1 = Math.min(LUMA_BINS - 1, i0 + 1);
-      const t = f - i0;
-      return [
-        lumaCurve[i0*4]   * (1 - t) + lumaCurve[i1*4]   * t,
-        lumaCurve[i0*4+1] * (1 - t) + lumaCurve[i1*4+1] * t,
-      ];
-    }
-    if (minL > 0.05 && out.length < MAX_PAL){
-      const [ea, eb] = curveAt(0);
-      out.push({L: 0, a: ea, b: eb, strength: par.lumaLook, synthetic: true});
-    }
-    if (maxL < 0.95 && out.length < MAX_PAL){
-      const [ea, eb] = curveAt(1);
-      out.push({L: 1, a: ea, b: eb, strength: par.lumaLook, synthetic: true});
-    }
-  }
+  // (Whitepoint/blackpoint synth anchors removed: lPreserve already extends the
+  // output to the input's luma range, so injecting L=0/L=1 anchors was redundant
+  // — and it let lumaLook reach into step 1. Step 1 now sees only real anchors
+  // [+ extend-palette synths]; lumaLook is step 3 only.)
 
   return out.slice(0, MAX_PAL);
 }
@@ -1841,6 +1833,7 @@ function applyLateStages(seeds, N){
     gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'), N);
     gl.uniform1f(gl.getUniformLocation(blurProg, 'uAbRange'), LUT_AB_RANGE);
     gl.uniform1f(gl.getUniformLocation(blurProg, 'uHueGate'), state.params.hueGate);
+    gl.uniform1f(gl.getUniformLocation(blurProg, 'uChromaGate'), state.params.chromaGate);
     const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
     const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
     const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
@@ -1908,6 +1901,9 @@ function recomputeLut(){
   if (!gl) return;
   const seeds = paletteSeeds();
   const palN  = Math.min(seeds.length, MAX_PAL);
+  // Cache the EXACT seed set the LUT was built from (real + any synth, capped),
+  // so the preview markers reflect every seed — no hidden anchors.
+  state.lutSeeds = seeds.slice(0, palN);
   // Cache synth subset for the swatch grid (so synth chips reflect the actual
   // seeds the LUT was built from, after MAX_PAL cap).
   state.synthSeeds = seeds.slice(0, palN).filter(s => s.synthetic);
@@ -1942,10 +1938,12 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaL'),  state.params.lRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaAB'), state.params.abRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uHueLWeight'), state.params.hueLWeight);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLPreserve'),  state.params.lPreserve);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCPreserve'),  state.params.cPreserve);
   gl.uniform1f(gl.getUniformLocation(prog, 'uHRange'),  state.params.hRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uHueGate'), state.params.hueGate);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uChromaGate'), state.params.chromaGate);
   // Envelope floor/ceil extensions (dual slider). Value = relaxedness = the
   // shader extension directly (1 = noop / off, 0 = clamp at the border); C is a
   // [0,1] fraction scaled to OkLab chroma units.
@@ -2206,6 +2204,9 @@ uniform float uZ;             // current L-slice index in [0, N-1]
 uniform float uSigmaL;        // anisotropic L axis
 uniform float uSigmaAB;       // anisotropic A/B axes
 uniform float uSoftness;      // IDW power exponent
+uniform float uHueLWeight;    // L weight in the HUE/chroma blend metric. Low = hue
+                              // borrowed across all L (keeps colour at extreme L);
+                              // high = hue tied to L like luma. (Luma always full L.)
 uniform float uLPreserve;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCPreserve;        // 0 = snap chroma to anchor, 1 = passthrough cell C
 uniform float uHRange;        // shared anchor hue range — Gaussian gate scale (rad)
@@ -2214,6 +2215,8 @@ uniform float uHueGate;       // Hue-fidelity safety net: value at 90° AND
                               // -uHueGate. 0 → kills 90°+; 1 → only 180°
                               // killed; intermediate → both 90° value and
                               // kill cone widen together.
+uniform float uChromaGate;   // 1 = fade near-grey texels toward grey (safety
+                              // net); 0 = keep their chroma (toggle off).
 // Envelope extensions — floor (Lo) and ceil (Hi) handles of a dual-thumb
 // slider. Each EXTENDS the per-hue curve bound outward on its side; at the max
 // (L: 1, C: LUT_AB_RANGE) the band covers the full range so that side is a
@@ -2295,12 +2298,12 @@ void main(){
     float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
     float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
     float w_l = pow(r2, -halfP) * s.w;
-    // Chroma weight penalises Luma distance LESS (0.35×) than the luma weight,
-    // so a dark/bright cell still picks up its HUE'S chroma from anchors at
-    // other L — colours are kept at extreme L instead of fading to grey. The L
-    // itself still comes from the (full-L) ungated luma weight, and black/white
-    // anchors still pull the extremes via luma + the envelope floor.
-    float d2c = dL*dL*invSL2*0.35 + dA*dA*invSA2 + dB*dB*invSA2;
+    // Chroma weight penalises Luma distance LESS (×uHueLWeight, default 0.35)
+    // than the luma weight, so a dark/bright cell still picks up its HUE'S chroma
+    // from anchors at other L — colours are kept at extreme L instead of fading
+    // to grey. The L itself still comes from the (full-L) ungated luma weight,
+    // and black/white anchors still pull the extremes via luma + envelope floor.
+    float d2c = dL*dL*invSL2*uHueLWeight + dA*dA*invSA2 + dB*dB*invSA2;
     float w   = pow((d2c + 1e-6) / (dmin2 + 1e-6), -halfP) * s.w;
     float ancC2 = s.y*s.y + s.z*s.z;
     if (gateC2 > 1e-6 && ancC2 > 1e-6){
@@ -2327,7 +2330,7 @@ void main(){
   vec2  dir    = (magAB > 1e-6) ? lab.yz / magAB : vec2(0.0);
 
   // Hue-fidelity safety net:
-  //   • chromaTrust → fade near-grey texels (no reliable Hue ref) toward grey.
+  //   • chromaGate → fade near-grey texels (no reliable Hue ref) toward grey.
   //   • hue gate → when the IDW direction OPPOSES the texel's identity Hue
   //     (a confidently-wrong hue), ROTATE the output toward the NEAREST PALETTE
   //     anchor's hue and drop its chroma to a low "slightly coloured" level.
@@ -2356,7 +2359,10 @@ void main(){
     }
     // Opposing cells keep luma but fade to a low palette-tinted chroma.
     float opposeChroma = mix(1.0, 0.3, shift);
-    gate = smoothstep(0.002, 0.025, sqrt(cellC2)) * opposeChroma;
+    // chromaGate: fade near-grey texels (no reliable hue) toward grey. Strength
+    // 1 = full desat; 0 = keep chroma (no greying/whitening near the grey axis).
+    float ct = mix(1.0, smoothstep(0.002, 0.025, sqrt(cellC2)), uChromaGate);
+    gate = ct * opposeChroma;
   }
 
   // --- step 1 (o0): IDW core. cPreserve/lPreserve neutral, no
@@ -2467,6 +2473,7 @@ uniform float uZ;
 uniform vec3  uAxis;
 uniform float uAbRange;
 uniform float uHueGate;
+uniform float uChromaGate;   // 1 = fade near-grey toward grey; 0 = keep chroma
 uniform float uBlurStrength;   // 0 = passthrough centre sample, 1 = full blur.
                                 // Dispatcher tapers across iters so the final
                                 // pass blends gently with the next anchor stamp.
@@ -2506,9 +2513,9 @@ void main(){
     float cosFull = mix(-0.3, -0.97, uHueGate);
     hueGateMult   = smoothstep(-1.0, cosFull, cosOut);
   }
-  float chromaTrust = smoothstep(0.002, 0.025, sqrt(cellC2));
+  float chromaGate = mix(1.0, smoothstep(0.002, 0.025, sqrt(cellC2)), uChromaGate);
   // No lumaTrust fade — keep chroma at the L extremes (no grey-out near ceil/floor).
-  v.gb *= hueGateMult * chromaTrust;
+  v.gb *= hueGateMult * chromaGate;
   // Final taper: mix between the (chroma-preserved, safety-netted) blur output
   // and the original center sample. Lets the dispatcher reduce blur strength
   // over iterations so anchor neighbourhoods aren't smeared away before the
@@ -3417,12 +3424,14 @@ function renderStagePreview(canvasId, lutTex, strength, drawEnvelope){
   // Anchor markers: x ← hue (0..360°), y ← L (top = bright, bot = dark).
   // Fill = the stage result sampled at that pixel (dot blends with the output
   // beneath it); a thin ring of the anchor's true sRGB keeps its hue legible.
-  for (const p of state.palette){
-    const [rr, gg, bb] = hexToRgb(p.hex);
-    const lab = rgbToOklab(rr, gg, bb);
+  // Mark EVERY seed the LUT was built from (state.lutSeeds — real + synth), so
+  // there are no hidden anchors. Greys (no hue) park at the left edge (hue 0).
+  const _markerSeeds = (state.lutSeeds && state.lutSeeds.length)
+    ? state.lutSeeds.map(s => [s.L, s.a, s.b])
+    : state.palette.map(p => { const [r,g,b] = hexToRgb(p.hex); return rgbToOklab(r, g, b); });
+  for (const lab of _markerSeeds){
     const C = Math.hypot(lab[1], lab[2]);
-    if (C < 0.005) continue;  // skip greys (no defined hue position)
-    let hueDeg = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+    let hueDeg = C < 0.005 ? 0 : Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
     if (hueDeg < 0) hueDeg += 360;
     const x = (hueDeg / 360) * W;
     const y = (1 - lab[0]) * (H - 1);  // top=bright(L=1), bot=dark(L=0)
@@ -3513,11 +3522,10 @@ function renderLutSlicePreview(){
   // pixel so the dot core blends with the rendered output beneath it.
   // Draw farthest-L anchors first so the nearest end up on top (not buried
   // when several anchors overlap in (a, b)).
-  const markers = state.palette.map(p => {
-    const [rr, gg, bb] = hexToRgb(p.hex);
-    const lab = rgbToOklab(rr, gg, bb);
-    return { lab, dL: Math.abs(lab[0] - L) };
-  });
+  const _ms = (state.lutSeeds && state.lutSeeds.length)
+    ? state.lutSeeds.map(s => [s.L, s.a, s.b])
+    : state.palette.map(p => { const [r,g,b] = hexToRgb(p.hex); return rgbToOklab(r, g, b); });
+  const markers = _ms.map(lab => ({ lab, dL: Math.abs(lab[0] - L) }));
   markers.sort((a, b) => b.dL - a.dL);
   for (const m of markers){
     const lab = m.lab;
@@ -3947,6 +3955,7 @@ function init(){
   bindLutSlider('hueGate',    'vHueGate',    'hueGate',    v => v.toFixed(2));
   bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
   bindLutSlider('abRange',    'vAbRange',    'abRange',    v => v.toFixed(2));
+  bindLutSlider('hueLWeight', 'vHueLWeight', 'hueLWeight', v => v.toFixed(2));
   // Softness slider is inverted vs. its internal IDW exponent: slider position
   // = 13 − exponent. So high slider = mushy/soft, low = hard nearest. Keeps the
   // intuition "softness 12 means very soft" while the math stays sensible.
@@ -4019,6 +4028,7 @@ function init(){
   // Anchor stamp strength changes the LUT → rebuild. The env-viz overlays only
   // draw on the previews → just re-render them.
   bindLutSlider('stampStrength', 'vStampStrength', 'stampStrength', v => v.toFixed(2));
+  bindLutSlider('chromaGate', 'vChromaGate', 'chromaGate', v => v.toFixed(2));
   for (const id of ['debugEnvVizL', 'debugEnvVizC']){
     const el = document.getElementById(id);
     if (!el) continue;
@@ -4058,18 +4068,23 @@ function init(){
   // Preset object key order, sliderMap key order, and PRESET_KEYS list below
   // all mirror the UI / pipeline order — easier to compare entries by eye.
   const lutPresets = {
-    // Three presets that differ ONLY by softness (IDW Shepard exponent). All
-    // other params — global hueGate, anchor ranges, preserve,
-    // envelope, late stages — are identical across presets. 'soft' = low
-    // exponent (smooth blend), 'hard' = high exponent (near-Voronoi snap).
-    'soft':     { hueGate: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 2.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'balanced': { hueGate: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 4.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'hard':     { hueGate: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    // Three presets that differ ONLY by softness. Stored as IDW Shepard
+    // exponent (state.params.softness); slider DISPLAY value = 11 − exponent.
+    //   soft     → display 8 (max — gentlest IDW), exponent 3
+    //   balanced → display 6 (middle),             exponent 5
+    //   hard     → display 3 (Voronoi snap),       exponent 8
+    // All other params identical: globals (hueGate / lumaGuard) and anchor
+    // ranges at 0.5; preserve at 0.5; envelope fully relaxed; late stages same.
+    'soft':     { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    'balanced': { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 5.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    'hard':     { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
+    chromaGate:['chromaGate','vChromaGate',v => v.toFixed(2)],
     lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
     abRange:    ['abRange',    'vAbRange',    v => v.toFixed(2)],
+    hueLWeight: ['hueLWeight', 'vHueLWeight', v => v.toFixed(2)],
     hRange:     ['hRange',     'vHRange',     v => v.toFixed(2)],
     // softness has a bespoke inverted handler — not in this map
     lPreserve:  ['lPreserve',  'vLPreserve',  v => v.toFixed(2)],
@@ -4142,10 +4157,10 @@ function init(){
     // Order mirrors the UI / pipeline order (state.params, sliderMap, and
     // the preset objects above all use the same order).
     'lutSize',
-    // Global hue-gate safety net
-    'hueGate',
+    // Global safety nets
+    'hueGate', 'chromaGate',
     // Build params
-    'lRange', 'abRange', 'hRange', 'softness',
+    'lRange', 'abRange', 'hRange', 'softness', 'hueLWeight',
     // Build-stage texel→identity blend
     'lPreserve', 'cPreserve',
     // Envelope clamp — dual-thumb floor/ceil extensions
@@ -4280,6 +4295,7 @@ function init(){
   const extendLWrap     = document.getElementById('extendLWrap');
   const extendCWrap     = document.getElementById('extendCWrap');
   const extendHWrap     = document.getElementById('extendHWrap');
+  const extendLabel = document.getElementById('extendPaletteLabel');
   function refreshExtendUI(){
     const on = state.params.extendPalette;
     const op = on ? '1' : '0.4';
@@ -4288,6 +4304,7 @@ function init(){
       el.style.opacity = op;
       el.style.pointerEvents = pe;
     }
+    if (extendLabel) extendLabel.textContent = on ? 'on' : 'off';
     updateExtendStatus();
   }
   extendCb.checked = state.params.extendPalette;
