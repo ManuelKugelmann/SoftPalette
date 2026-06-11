@@ -59,7 +59,9 @@ Per-hue palette L/C band, from ALL anchors. SMOOTH and contains every anchor:
 log-sum-exp soft band → ×12 circular blur along hue → **metaball** Gaussian
 re-inclusion bumps (each anchor adds a bump sized to its deficit so the band
 reaches it, staying smooth) → ceil≥floor guard (collapse to mean if inverted).
-Chroma ceil also keeps a hard local inclusion.
+Achromatic anchors (black/white/grey, `C < 0.25·C_REF`) are included RING-WIDE
+(bound L at every hue, flat); chromatic ones locally. Chroma ceil keeps a hard
+local inclusion.
 Clamp (o1 1g): dual-thumb **extension** `lExtLo/Hi`, `cExtLo/Hi` EXTEND the band
 outward (1 = noop/relaxed, 0 = clamp at curve). Luma clamp = order-preserving
 COMPRESSION skirt (below-floor stays below floor — no overbrighten; input-L
@@ -71,10 +73,10 @@ late (`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`).
 Capture `lutTexStep2` (o1) → **monotonic-L pass on the step1 & step2 snapshots**
 (`makeColumnMonotonic`/`applyLumaOrderPass`) → anchor stamp → blur × `smoothness`
 (`FS_LUT_BLUR`: chroma-preserving + hue net, taper 1→0.3) → reach desat
-(`applyReachPass`) → luma-look (`applyLumaLookPass`: rotates `arg(yz)` toward the
-L→hue curve, reads `lutTexRaw`, re-runs alone on slider change) → final
-monotonic-L → soft closing stamp (`stampStrength`). Final blend = `lutStrength`.
-(Luma-look is largely modellable by `wHue`→L; still present.)
+(`applyReachPass`) → luma-look (`applyLumaLookPass`) → final monotonic-L → soft
+closing stamp (`stampStrength`). Final blend = `lutStrength`.
+**Luma-look is RETIRED**: slider hidden, default 0 → the pass is a no-op (pass +
+`computeLumaCurve` + `lutTexRaw` kept). Modellable via `wHue`→L instead.
 
 ### Previews / debug
 
@@ -104,9 +106,9 @@ reliable.
   --dump-dom file:///C:/Projects/SoftPalette/index.html > dom.html 2> err.txt
 ```
 
-`#lutStatus` (via `updateLutStatus`): clean ≈ `built in <N>ms · neighbours ΔE
-avg ≈0.02 · anchor self ΔE max ≈0.006`. Empty = init crash; grep err for
-`shader`/`Uncaught`/`TypeError`. Trailing `N/N off` = anchor count (32/32 with
-extend-palette on). **A/B**: full-window pixel diff of two temp copies with a
-flipped `state.params` default (sub-crops often hit only background). Per-pixel
-shaders are invisible to `#lutStatus` → `--screenshot`.
+Verify via **stderr** (clean = 0 of `shader`/`compile`/`Uncaught`/`TypeError`/
+`ReferenceError`; benign `usb_service`/`gcm` noise aside) **+ a `--screenshot`**.
+(The old on-page `#lutStatus` build-status line was removed — don't rely on it;
+`state.lutBuildMs` / `validateAnchorNeighbours` still exist if a probe is needed.)
+**A/B**: full-window pixel diff of two temp copies with a flipped `state.params`
+default — sub-crops often hit only the dark background and read 0.

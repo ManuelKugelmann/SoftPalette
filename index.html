@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T13:57:38Z">
+<meta name="build" content="2026-06-11T15:33:18Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -24,6 +24,8 @@
 html,body{margin:0;padding:0;background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.5}
 body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 a{color:var(--ac)}
+h1 .dim a{color:rgba(95,214,163,0.6);text-decoration:none}
+h1 .dim a:hover{color:var(--ac)}
 
 header{
   display:flex;align-items:center;justify-content:space-between;
@@ -105,6 +107,10 @@ input[type=range]::-webkit-slider-thumb{
   width:10px;height:14px;background:var(--ac);margin-top:-6px;border:0;
 }
 input[type=range]::-moz-range-thumb{width:10px;height:14px;background:var(--ac);border:0;border-radius:0}
+.slider.disabled input[type=range]::-webkit-slider-thumb{background:var(--txd)}
+.slider.disabled input[type=range]::-moz-range-thumb{background:var(--txd)}
+.slider.disabled input[type=range]::-webkit-slider-runnable-track{background:var(--bd)}
+.slider.disabled .lbl,.slider.disabled .lbl .v{color:var(--txd)}
 
 /* Dual-thumb range: two <input type=range> overlaid on one track. Tracks are
    click-through (pointer-events:none); only the thumbs grab. Left thumb =
@@ -204,10 +210,10 @@ label.toggle{
   display:flex;align-items:center;gap:8px;cursor:pointer;
   padding:6px 0;font-size:11px;color:var(--tx);
 }
-label.toggle input{appearance:none;-webkit-appearance:none;width:28px;height:14px;background:var(--bg3);border:1px solid var(--bd);position:relative;cursor:pointer}
-label.toggle input::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;background:var(--txd);transition:all 0.15s}
-label.toggle input:checked{border-color:var(--ac)}
-label.toggle input:checked::after{left:15px;background:var(--ac)}
+label.toggle input{appearance:none;-webkit-appearance:none;width:28px;height:14px;background:var(--bg3);border:1px solid rgba(95,214,163,0.45);position:relative;cursor:pointer}
+label.toggle input::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;background:rgba(95,214,163,0.55);transition:all 0.15s}
+label.toggle input:checked{border-color:var(--ac);background:var(--ac)}
+label.toggle input:checked::after{left:15px;background:#fff}
 
 .seg{display:flex;border:1px solid var(--bd);margin-bottom:12px}
 .seg label{
@@ -231,9 +237,9 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <body>
 
 <header>
-  <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
+  <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-11T13:57:38Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-11T15:33:18Z</span>
   </div>
 </header>
 
@@ -244,8 +250,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>presets</h2>
     <div class="row tight">
-      <button data-preset="cold-warm" title="Cool darks, warm lights">cold/warm</button>
-      <button data-preset="moebiusGhibli" title="Moebius + Ghibli illustration look">moebius/ghibli</button>
+      <button data-preset="cold-warm" title="Cool darks, warm lights">cold+warm</button>
+      <button data-preset="moebiusGhibli" title="Moebius + Ghibli illustration look">moebius|ghibli</button>
       <button data-preset="office" title="Office-style accent colours">office</button>
       <button data-preset="nord" title="Nord — cool frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — neon highlights">dracula</button>
@@ -261,7 +267,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="NES" title="NES hardware palette (~54 colours)">(S)NES</button>
       <button data-preset="EGA" title="EGA / CGA 16-colour palette">EGA</button>
       <button data-preset="CGA" title="CGA: black, cyan, magenta, white">CGA</button>
-      <button data-preset="phosphor" title="Old mono monitor tints + black">phosphor</button>
+      <button data-preset="phosphor" title="Old mono monitor tints + black">Old CRT</button>
     </div>
   </section>
 
@@ -277,7 +283,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 
   <section class="card" data-collapsed-default="true">
     <h2>auto extend palette</h2>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+    <label class="toggle">
       <input type="checkbox" id="extendPalette">
       <span id="extendPaletteLabel">off</span>
     </label>
@@ -319,6 +325,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <button id="mangaImage"      class="tab" title="Wikipe-tan — flat anime style">manga</button>
     <button id="strategyImage"   class="tab" title="0 A.D. — strategy game">strategy</button>
     <button id="shooterImage"    class="tab" title="Xonotic — first-person shooter">shooter</button>
+    <button id="candyImage"      class="tab" title="Fortnite — candy-lit cartoon shooter">candy</button>
     <button id="loadFile"        class="tab tab-file" title="Browse, drop or paste an image">file…</button>
   </div>
   <div id="canvasWrap" class="empty">
@@ -336,20 +343,10 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- RIGHT -->
 <aside class="right">
   <section class="card">
-    <h2>lut parameters</h2>
-    <div class="row full compact" style="margin-bottom:8px;display:flex;gap:4px">
-      <button id="savePreset"  style="flex:1" title="Save settings to file">save</button>
-      <button id="loadPreset"  style="flex:1" title="Load settings from file">load</button>
-      <button id="copyPreset"  style="flex:1" title="Copy settings to clipboard">copy</button>
-      <button id="pastePreset" style="flex:1" title="Paste settings from clipboard">paste</button>
-    </div>
-    <input type="file" id="loadPresetFile" accept="application/json,.json" style="display:none">
-    <div class="row full compact" style="margin-bottom:8px;display:flex;flex-wrap:nowrap;gap:4px">
-      <button data-lutpreset="soft"      style="flex:1" title="Soft blend between colours">soft</button>
-      <button data-lutpreset="balanced"  style="flex:1" title="Balanced blend">balanced</button>
-      <button data-lutpreset="hard"      style="flex:1" title="Sharp colour edges">hard</button>
-      <button data-lutpreset="tone"      style="flex:1" title="Keep brightness, recolour">tone</button>
-    </div>
+    <h2 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>lut parameters</span>
+      <button id="resetLutParams" title="Reset all settings to defaults" style="background:none;border:1px solid var(--bd);color:var(--txd);font-size:11px;padding:1px 8px;line-height:1;cursor:pointer;border-radius:3px">↺</button>
+    </h2>
 
     <!-- GLOBAL: LUT size + hue gate. NOT step-scoped: hue gate gates
          opposing-hue chroma in build (step 1) AND the smoothness blur (step 3).
@@ -376,11 +373,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
          anchor's hue axis — stable at grey). softness = Shepard power. -->
     <div style="display:flex;gap:8px;margin-top:6px">
       <div style="flex:1;text-align:center">
-        <div class="note" style="color:var(--txd)">luma blend</div>
+        <div class="note" style="color:var(--txd)">anchor luma blend</div>
         <canvas id="triLuma" width="124" height="112" title="Brightness blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
       </div>
       <div style="flex:1;text-align:center">
-        <div class="note" style="color:var(--txd)">hue blend</div>
+        <div class="note" style="color:var(--txd)">anchor hue blend</div>
         <canvas id="triHue" width="124" height="112" title="Colour blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
       </div>
     </div>
@@ -388,32 +385,37 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">0.50</span></div>
       <input type="range" id="softness" min="0" max="1" step="0.01" value="0.5">
     </div>
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>blur</span><span class="v" id="vStep1Smoothness">3</span></div>
+      <input type="range" id="step1Smoothness" min="0" max="30" step="1" value="3">
+    </div>
 
     <!-- step 1 preview — IDW core (lutTexStep1), before preserve+envelope. -->
     <canvas id="step1Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px"></canvas>
+    <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
 
-    <!-- Texel→identity-LUT blend (build-stage, coherence-gated for IDW).
-         0 = full LUT effect (snap to anchor's Luma/Chroma);
-         1 = passthrough identity (image Luma/Chroma preserved). -->
+    <!-- STEP 2, grouped by channel. preserve = texel→identity blend (0 = snap
+         to anchor, 1 = keep image); envelope = dual-thumb relaxedness (1 = no
+         limit, 0 = clamp at the per-hue border); preview = hue × that channel. -->
+    <!-- LUMA: preserve · envelope · preview (hue × L) -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>luma preserve</span><span class="v" id="vLPreserve">1.00</span></div>
       <input type="range" id="lPreserve" min="0" max="1" step="0.01" value="1.0">
     </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>chroma preserve</span><span class="v" id="vCPreserve">0.50</span></div>
-      <input type="range" id="cPreserve" min="0" max="1" step="0.01" value="0.5">
-    </div>
-
-    <!-- Envelope clamp (shared). Two sliders side-by-side per channel. Value
-         = relaxedness: 1 = no limit, 0 = clamp exactly at the per-hue border.
-         The floor slider is mirrored so both handles meeting at the centre =
-         fully constrained from both sides; both at the outer edges = relaxed. -->
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>luma envelope</span><span class="v"><span id="vLExtLo">0.50</span> <span style="opacity:0.4">|</span> <span id="vLExtHi">0.50</span></span></div>
       <div class="intervalpair">
         <input type="range" id="lExtLo" min="0" max="1" step="0.01" value="0.5">
         <input type="range" id="lExtHi" min="0" max="1" step="0.01" value="0.5">
       </div>
+    </div>
+    <canvas id="step2Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px" title="step 2 · luma ramp (hue × L) — shows the luma envelope"></canvas>
+    <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
+
+    <!-- CHROMA: preserve · envelope · preview (hue × chroma) -->
+    <div class="slider" style="margin-top:8px">
+      <div class="lbl"><span>chroma preserve</span><span class="v" id="vCPreserve">0.10</span></div>
+      <input type="range" id="cPreserve" min="0" max="1" step="0.01" value="0.1">
     </div>
     <div class="slider" style="margin-top:6px">
       <div class="lbl"><span>chroma envelope</span><span class="v"><span id="vCExtLo">0.50</span> <span style="opacity:0.4">|</span> <span id="vCExtHi">0.50</span></span></div>
@@ -422,11 +424,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <input type="range" id="cExtHi" min="0" max="1" step="0.01" value="0.5">
       </div>
     </div>
-
-    <!-- step 2 preview — after preserve + envelope (lutTexStep2). Top = hue×L
-         ramp (luma envelope), bottom = hue×chroma ramp (chroma envelope). -->
-    <canvas id="step2Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px"></canvas>
-    <canvas id="step2cPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:4px" title="step 2 · chroma ramp (hue × chroma at fixed L) — shows the chroma envelope"></canvas>
+    <canvas id="step2cPreview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px" title="step 2 · chroma ramp (hue × chroma at fixed L) — shows the chroma envelope"></canvas>
+    <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
 
     <!-- Late stages, in execution order: blur (N iters, each ending in a hard
          restamp) → closing anchor stamp → reach → luma look. Blur + closing
@@ -436,15 +435,18 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="lbl"><span>blur</span><span class="v" id="vSmoothness">0</span></div>
       <input type="range" id="smoothness" min="0" max="30" step="1" value="0">
     </div>
-    <div class="slider" style="margin-top:6px" title="Keep palette colours pure at end">
-      <div class="lbl"><span>anchor stamp smoothness</span><span class="v" id="vStampStrength">0.50</span></div>
-      <input type="range" id="stampStrength" min="0" max="1" step="0.01" value="0.5">
+    <!-- anchor stamp smoothness hidden; held at state.params.stampStrength = 0.5. -->
+    <div class="slider" style="margin-top:6px">
+      <div class="lbl"><span>luma reach</span><span class="v" id="vReachL">0.50</span></div>
+      <input type="range" id="reachL" min="0.05" max="1.0" step="0.01" value="0.5">
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>reach</span><span class="v" id="vReach">0.50</span></div>
-      <input type="range" id="reach" min="0.05" max="1.0" step="0.01" value="0.5">
+      <div class="lbl"><span>hue reach</span><span class="v" id="vReachC">0.50</span></div>
+      <input type="range" id="reachC" min="0.05" max="1.0" step="0.01" value="0.5">
     </div>
-    <div class="slider" style="margin-top:6px">
+    <!-- luma look RETIRED — modellable via the wHue triangle (lean toward L).
+         Hidden + defaulted off; code/pass kept (no-op at 0). -->
+    <div class="slider" style="margin-top:6px;display:none">
       <div class="lbl"><span>luma look</span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
@@ -458,22 +460,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <!-- step 3 preview — final pipeline (blur/reach/luma-look + blend). -->
     <canvas id="step3Preview" width="280" height="70" style="width:100%;height:auto;display:block;image-rendering:auto;border:1px solid var(--bd);margin-top:6px"></canvas>
 
-    <!-- LUT stage selector — pick which pipeline step drives the test image. -->
-    <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
-      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txd)" title="Pick processing step to preview">
-        LUT
-        <select id="lutStage" style="flex:1;background:var(--bg3);color:var(--tx);border:1px solid var(--bd);font:inherit;font-size:11px;padding:2px 4px">
-          <option value="1">step 1 — idw core</option>
-          <option value="2" selected>step 2 — + preserve/envelope</option>
-          <option value="3">step 3 — final pipeline</option>
-        </select>
-      </label>
+    <div class="row full compact" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd);display:flex;gap:4px">
+      <button id="savePreset"  style="flex:1" title="Save settings to file">save</button>
+      <button id="loadPreset"  style="flex:1" title="Load settings from file">load</button>
+      <button id="copyPreset"  style="flex:1" title="Copy settings to clipboard">copy</button>
+      <button id="pastePreset" style="flex:1" title="Paste settings from clipboard">paste</button>
     </div>
-    <div class="note" id="lutStatus" style="margin-top:6px"></div>
+    <input type="file" id="loadPresetFile" accept="application/json,.json" style="display:none">
   </section>
 
   <section class="card">
-    <h2>previews</h2>
+    <h2>lut view</h2>
     <div class="note" style="margin:0 0 3px">LUT slice <span style="color:var(--txdd)">(a→, b↑) at L=<span id="vLutSliceL">0.50</span></span></div>
     <!-- Vertical L slider to the right of the slice square: top = bright (L=1). -->
     <div style="display:flex;align-items:flex-start;gap:8px">
@@ -483,7 +480,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   </section>
 
   <section class="card">
-    <h2>export</h2>
+    <h2>lut export</h2>
     <div class="row full">
       <button id="exportPng">⬇ png</button>
     </div>
@@ -521,12 +518,14 @@ const PRESETS = {
   // (#1f4a3a) sits with the cool cluster; the amber (#d4a040) sits with the
   // warm cluster. The original green-teal #3ab088 has been darkened to
   // #2a8068 so it doesn't dominate the bright half.
-  'cold-warm': ['#0a3a48','#1f4a3a','#1d5a66','#205a48','#fae060','#d5832f','#c44a2e'],
+  'cold-warm': ['#0a3a48','#1f4a3a','#fae060','#d5832f','#c44a2e'],
   // Merged moebius + ghibli — illustration palette: warm cream/sand, sky+navy
   // blues, rust accent, sage/teal greens. Deduplicates the two source sets.
   'moebiusGhibli': ['#e6c8a0','#e8d8a0','#7ca6c8','#a8c8e0','#3a4a78','#2c4a5a','#c46a4a','#5a8a5a','#5e8a5e'],
-  // MS-Office accent style: teal/yellow/berry/cherry/navy/lime
-  'office':      ['#1abc9c','#f1c40f','#c2185b','#d2042d','#1a237e','#2ecc71'],
+  // Windows 10-era accent theme: one per hue family (signature blue #0078d7,
+  // cyan, teal, green, seafoam, gold, orange, red, magenta, orchid, indigo) +
+  // grey + white + black so it spans the full L range.
+  'office':      ['#0078d7','#0099bc','#018574','#107c10','#00cc6a','#ffb900','#f7630c','#d13438','#e3008c','#b146c2','#6b69d6','#767676','#ffffff','#000000'],
   // Nord — frost (cool blues) + aurora (warm accents)
   'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
   // Dracula — neon highlights
@@ -641,8 +640,12 @@ const state = {
     // (chroma/hue blend). Each [wL, wC, wH], summing to 1. Default both at the
     // centroid (equal L/C/H) — neutral; drag toward a vertex to bias, and pull
     // the two pins apart to decouple luma from colour.
-    wLuma: [1/3, 1/3, 1/3],
-    wHue:  [1/3, 1/3, 1/3],
+    // Default pins: luma blend nudged toward L (brightness biased toward
+    // source); hue blend nudged toward the C/H edge (colour blend leans away
+    // from L). Modest offsets from the centroid — clearly biased but not
+    // glued to a vertex.
+    wLuma: [0.50, 0.25, 0.25],
+    wHue:  [0.20, 0.40, 0.40],
     softness: 4.5,         // IDW power exponent (UI shows 11−exp = 6.5, "balanced").
     // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
     hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
@@ -656,7 +659,7 @@ const state = {
     // Texel→identity-LUT blend (applied inside FS_LUT_BUILD with anchor
     // coherence gate; 0 = full LUT effect, 1 = passthrough identity).
     lPreserve: 1.0,
-    cPreserve: 0.5,
+    cPreserve: 0.1,
 
     // Per-channel Luma / Chroma envelope clamp around the Hue-interpolated
     // palette envelope. Dual-thumb: floor (Lo) + ceil (Hi) EXTENSION of the
@@ -671,10 +674,18 @@ const state = {
     cExtLo: 0.5,
     cExtHi: 0.5,
 
+    // Step 1 finish: blur applied to the IDW core (lutTexStep1) right after MRT
+    // capture. Same blur kernel + anchor restamp as the late-stage blur, but
+    // scoped to step 1 only — step 2 still uses the unblurred IDW build.
+    step1Smoothness: 3,
     // Shared late stages (execution order).
     smoothness: 2,         // post-build Gaussian blur iter count (each iter = 3 axis blurs + anchor restamp)
-    reach: 0.5,            // late-stage anchor rejection radius (Lab units). Beyond reach the texel desaturates.
-    lumaLook: 0.25,        // late-stage rotation of arg(yz) toward the Luma→Hue curve.
+    // Reach desaturation: cells beyond `reach` from any anchor fade toward grey.
+    // Split into luma reach (axis-L) and hue reach (axis-AB) — like wLuma/wHue
+    // in step 1, lets you grant L-axis tolerance independently from hue/chroma.
+    reachL: 0.5,           // luma reach radius (L units).
+    reachC: 0.5,           // hue/chroma reach radius (Lab AB units).
+    lumaLook: 0.0,         // RETIRED (no-op at 0); modellable via wHue→L.
 
     // Final per-pixel blend with the original image (post LUT lookup).
     lutStrength: 1.0,
@@ -694,8 +705,6 @@ const state = {
     // pinned hard throughout; only this closing stamp is softened, so anchors
     // stay strong through the blur and blend into the surround at the end.
     stampStrength:    0.5,
-    // Debug: which pipeline-stage LUT drives the test image (1/2/3). 3 = final.
-    lutStage:         2,
 
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
@@ -726,7 +735,7 @@ const IMAGE_BTN_IDS = [
   'portraitImage', 'candidImage', 'classicImage', 'crowdImage',
   'natureImage', 'lakeImage', 'parrotsImage', 'colorfulImage',
   'starryNight', 'waveImage', 'monaLisaImage',
-  'mangaImage', 'strategyImage', 'shooterImage',
+  'mangaImage', 'strategyImage', 'shooterImage', 'candyImage',
 ];
 
 function refreshSelectionUI(){
@@ -1482,6 +1491,13 @@ function computeHueLCCurve(seeds){
     }
   };
   for (const a of A){
+    // Achromatic anchors (black / white / grey) have NO hue → they bound L at
+    // EVERY hue: include them RING-WIDE (flat min/max, stays smooth). Chromatic
+    // anchors stay local (a Gaussian bump at their own hue).
+    if (a.C < 0.25 * C_REF){
+      for (let i = 0; i < HUE_ENV_BINS; i++){ lo[i] = Math.min(lo[i], a.L); hi[i] = Math.max(hi[i], a.L); }
+      continue;
+    }
     const ci = ((Math.round((a.h + Math.PI) / TWO_PI * HUE_ENV_BINS - 0.5) % HUE_ENV_BINS) + HUE_ENV_BINS) % HUE_ENV_BINS;
     const dHi = a.L - hi[ci]; if (dHi > 0) bump(hi, ci, dHi, +1);
     const dLo = lo[ci] - a.L; if (dLo > 0) bump(lo, ci, dLo, -1);
@@ -1711,7 +1727,8 @@ function applyReachPass(srcTex, dstTex){
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, srcTex);
   gl.uniform1i(gl.getUniformLocation(prog, 'uLutIn'), 1);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uReach'),  state.params.reach);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uReachL'), state.params.reachL);
+  gl.uniform1f(gl.getUniformLocation(prog, 'uReachC'), state.params.reachC);
   gl.uniform1f(gl.getUniformLocation(prog, 'uN'),      N);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
   const uZ = gl.getUniformLocation(prog, 'uZ');
@@ -1827,8 +1844,6 @@ function scheduleLumaLookRefresh(){
   requestAnimationFrame(() => {
     state.rafPendingLook = false;
     applyLumaLookPass();
-    state.lutValidation = validateAnchorNeighbours();
-    updateLutStatus();
     renderHuePreview();
     requestRender();
   });
@@ -1860,6 +1875,49 @@ function copyLut3D(srcTex, dstTex, N){
   }
 }
 
+// Reusable 3D Gaussian blur loop: N iters of (3 separable axis-blurs + anchor
+// restamp), with per-iter strength taper 1.0 → 0.3. target/scratch are 3D
+// textures; result lands in whichever ends up as `src` after ping-pong, so the
+// caller swaps texture handles via the returned pair.
+function blurLut3D(target, scratch, N, iters, seeds){
+  if (iters <= 0) return { target, scratch };
+  const gl = state.gl;
+  const blurProg = state.programs.lutBlur;
+  gl.useProgram(blurProg);
+  gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'),         N);
+  gl.uniform1f(gl.getUniformLocation(blurProg, 'uAbRange'),   LUT_AB_RANGE);
+  gl.uniform1f(gl.getUniformLocation(blurProg, 'uHueGate'),   state.params.hueGate);
+  gl.uniform1f(gl.getUniformLocation(blurProg, 'uChromaGate'), state.params.chromaGate);
+  const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
+  const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
+  const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
+  const uBlurStr  = gl.getUniformLocation(blurProg, 'uBlurStrength');
+  const axes = [[1,0,0], [0,1,0], [0,0,1]];
+  let src = target, dst = scratch;
+  if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
+  const BLUR_MIN = 0.3;
+  for (let it = 0; it < iters; it++){
+    // stampAnchors switches the active program — re-bind blur each iter.
+    gl.useProgram(blurProg);
+    gl.uniform1i(uBlurSrc, 1);
+    gl.uniform1f(uBlurStr, 1.0 - (1.0 - BLUR_MIN) * (it / Math.max(iters - 1, 1)));
+    for (const ax of axes){
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_3D, src);
+      gl.uniform3f(uBlurAxis, ax[0], ax[1], ax[2]);
+      for (let z = 0; z < N; z++){
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dst, 0, z);
+        gl.uniform1f(uBlurZ, z);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+      const tmp = src; src = dst; dst = tmp;
+    }
+    stampAnchors(src, N, seeds);
+  }
+  return { target: src, scratch: dst };
+}
+
 function applyLateStages(seeds, N){
   const gl = state.gl;
 
@@ -1878,50 +1936,11 @@ function applyLateStages(seeds, N){
   // every seed's Lab holds the seed's EXACT value before any blur runs.
   stampAnchors(state.lutTex, N, seeds);
 
-  // Smoothness post-pass: per iter = 3 separable axis-blurs, then anchor restamp.
+  // Smoothness post-pass — uses the shared 3D blur helper.
   const iters = Math.max(0, Math.round(state.params.smoothness || 0));
-  if (iters > 0){
-    const blurProg = state.programs.lutBlur;
-    gl.useProgram(blurProg);
-    gl.uniform1f(gl.getUniformLocation(blurProg, 'uN'), N);
-    gl.uniform1f(gl.getUniformLocation(blurProg, 'uAbRange'), LUT_AB_RANGE);
-    gl.uniform1f(gl.getUniformLocation(blurProg, 'uHueGate'), state.params.hueGate);
-    gl.uniform1f(gl.getUniformLocation(blurProg, 'uChromaGate'), state.params.chromaGate);
-    const uBlurZ    = gl.getUniformLocation(blurProg, 'uZ');
-    const uBlurAxis = gl.getUniformLocation(blurProg, 'uAxis');
-    const uBlurSrc  = gl.getUniformLocation(blurProg, 'uSrc');
-    const uBlurStr  = gl.getUniformLocation(blurProg, 'uBlurStrength');
-    const axes = [[1,0,0], [0,1,0], [0,0,1]];
-    let src = state.lutTex, dst = state.lutTex2;
-    // Self-bind the LUT FBO: an earlier pass (reach / envelope) may have
-    // restored the default FBO, and the framebufferTextureLayer calls below
-    // target whatever is bound to gl.FRAMEBUFFER.
-    if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
-    // Blur strength taper: 1.0 (first iter, full blur) -> 0.3 (last iter,
-    // gentle so anchor neighbourhoods aren't smeared before the closing stamp).
-    // Single-iter case stays at full strength.
-    const BLUR_MIN = 0.3;
-    for (let it = 0; it < iters; it++){
-      gl.useProgram(blurProg);
-      gl.uniform1i(uBlurSrc, 1);
-      gl.uniform1f(uBlurStr, 1.0 - (1.0 - BLUR_MIN) * (it / Math.max(iters - 1, 1)));
-      for (const ax of axes){
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_3D, src);
-        gl.uniform3f(uBlurAxis, ax[0], ax[1], ax[2]);
-        for (let z = 0; z < N; z++){
-          gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, dst, 0, z);
-          gl.uniform1f(uBlurZ, z);
-          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        }
-        const tmp = src; src = dst; dst = tmp;
-      }
-      stampAnchors(src, N, seeds);
-    }
-    state.lutTex  = src;
-    state.lutTex2 = dst;
-  }
+  const after = blurLut3D(state.lutTex, state.lutTex2, N, iters, seeds);
+  state.lutTex  = after.target;
+  state.lutTex2 = after.scratch;
 
   stampAnchors(state.lutTex, N, seeds);
 
@@ -1939,11 +1958,6 @@ function applyLateStages(seeds, N){
   state.lutTexRaw = tmpLut;
   applyLumaLookPass();
 
-  // Validation: how close are anchor neighbours to the anchor's true Lab?
-  // Reads the just-finalized state.lutTex; result is rendered by
-  // updateLutStatus() into the LUT status line.
-  state.lutValidation = validateAnchorNeighbours();
-
   // Restore default framebuffer / viewport.
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, state.imageW || 1, state.imageH || 1);
@@ -1960,7 +1974,7 @@ function recomputeLut(){
   // Cache synth subset for the swatch grid (so synth chips reflect the actual
   // seeds the LUT was built from, after MAX_PAL cap).
   state.synthSeeds = seeds.slice(0, palN).filter(s => s.synthetic);
-  if (palN === 0){ state.lutBuildMs = 0; updateLutStatus(); renderHuePreview(); return; }
+  if (palN === 0){ state.lutBuildMs = 0; renderHuePreview(); return; }
 
   // Pin LUT size to one of the supported values.
   const N = LUT_SIZES.includes(state.params.lutSize) ? state.params.lutSize : 33;
@@ -1974,13 +1988,11 @@ function recomputeLut(){
   uploadHueLCCurve(state.hueLCCurve);
   ensureLutTexture(N);
 
-  // Step 1 (IDW Shepard bake, MRT → step1 + step2) then the shared late-stage
-  // pipeline (anchor stamp → smoothness blur+stamp loop → reach → lumalook).
+  // Pipeline: step 1 (IDW → lutTexStep1) → optional step-1 blur (shared
+  // blurLut3D) → step 2 (preserve+envelope → lutTex) → late stages.
   const prog = state.programs.lutBuild;
   gl.useProgram(prog);
   gl.bindVertexArray(state.vao);
-
-  // Bind seeds texture (unit 0).
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, state.seedTex);
   gl.uniform1i(gl.getUniformLocation(prog, 'uSeeds'), 0);
@@ -1989,171 +2001,59 @@ function recomputeLut(){
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
   gl.uniform3f(gl.getUniformLocation(prog, 'uWLuma'), state.params.wLuma[0], state.params.wLuma[1], state.params.wLuma[2]);
   gl.uniform3f(gl.getUniformLocation(prog, 'uWHue'),  state.params.wHue[0],  state.params.wHue[1],  state.params.wHue[2]);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLPreserve'),  state.params.lPreserve);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uCPreserve'),  state.params.cPreserve);
   gl.uniform1f(gl.getUniformLocation(prog, 'uHueGate'), state.params.hueGate);
   gl.uniform1f(gl.getUniformLocation(prog, 'uChromaGate'), state.params.chromaGate);
-  // Envelope floor/ceil extensions (dual slider). Value = relaxedness = the
-  // shader extension directly (1 = noop / off, 0 = clamp at the border); C is a
-  // [0,1] fraction scaled to OkLab chroma units.
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtLo'), state.params.lExtLo);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uLExtHi'), state.params.lExtHi);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uCExtLo'), state.params.cExtLo * LUT_AB_RANGE);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uCExtHi'), state.params.cExtHi * LUT_AB_RANGE);
   gl.uniform1f(gl.getUniformLocation(prog, 'uAbRange'), LUT_AB_RANGE);
-  // Bind hue→(L_lo, L_hi, C_lo, C_hi) curve (unit 3). REPEAT wrap closes the
-  // hue ring so the sample is continuous at 0°/360°.
-  gl.activeTexture(gl.TEXTURE3);
-  gl.bindTexture(gl.TEXTURE_2D, state.hueLCTex);
-  gl.uniform1i(gl.getUniformLocation(prog, 'uHueLCCurve'), 3);
   const uZLoc = gl.getUniformLocation(prog, 'uZ');
 
-  // FBO is reused across builds; (re)attached per layer below.
   if (!state.lutFbo) state.lutFbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
   gl.viewport(0, 0, N, N);
-
-  // MRT: location 0 → lutTexStep1 (step-1 core), location 1 → lutTex (step-2,
-  // the LUT the late stages consume). One dispatch; the IDW loop runs once.
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
   for (let z = 0; z < N; z++){
     gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTexStep1, 0, z);
-    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, state.lutTex,      0, z);
     gl.uniform1f(uZLoc, z);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
-  // Restore single-output for the stamp/blur/reach/luma-look passes that follow.
-  gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, null, 0, 0);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+  // Step 1 finish blur (same blurLut3D used by the late-stage blur).
+  const step1Iters = Math.max(0, Math.round(state.params.step1Smoothness || 0));
+  if (step1Iters > 0){
+    stampAnchors(state.lutTexStep1, N, seeds);
+    const s1 = blurLut3D(state.lutTexStep1, state.lutTex2, N, step1Iters, seeds);
+    state.lutTexStep1 = s1.target;
+    state.lutTex2     = s1.scratch;
+  }
+
+  // Step 2: preserve + envelope on (possibly blurred) step 1 → lutTex.
+  const prog2 = state.programs.lutStep2;
+  gl.useProgram(prog2);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_3D, state.lutTexStep1);
+  gl.uniform1i(gl.getUniformLocation(prog2, 'uLutIn'), 1);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uN'), N);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uAbRange'), LUT_AB_RANGE);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uLPreserve'), state.params.lPreserve);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uCPreserve'), state.params.cPreserve);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uLExtLo'),    state.params.lExtLo);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uLExtHi'),    state.params.lExtHi);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uCExtLo'),    state.params.cExtLo * LUT_AB_RANGE);
+  gl.uniform1f(gl.getUniformLocation(prog2, 'uCExtHi'),    state.params.cExtHi * LUT_AB_RANGE);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, state.hueLCTex);
+  gl.uniform1i(gl.getUniformLocation(prog2, 'uHueLCCurve'), 3);
+  const uZ2 = gl.getUniformLocation(prog2, 'uZ');
+  for (let z = 0; z < N; z++){
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTex, 0, z);
+    gl.uniform1f(uZ2, z);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
 
   applyLateStages(seeds, N);
 
   state.lutBuildMs = performance.now() - t0;
-  updateLutStatus();
   updateExtendStatus();
   renderHuePreview();
   renderSwatches();
-}
-
-function updateLutStatus(){
-  const el = document.getElementById('lutStatus');
-  if (!el) return;
-  if (state.palette.length === 0 || state.lutN === 0){ el.textContent = ''; return; }
-  let line = `LUT ${state.lutN}³ · built in ${state.lutBuildMs.toFixed(1)}ms`;
-  const v = state.lutValidation;
-  if (v && v.count > 0){
-    line += ` · neighbours ΔE avg ${v.avgDE.toFixed(3)} max ${v.maxDE.toFixed(3)}`;
-    line += ` · anchor self ΔE max ${v.maxSelfDE.toFixed(3)}`;
-    if (v.missing > 0)   line += ` · ${v.missing}/${v.totalAnchors} off`;
-    if (v.collisions > 0) line += ` · ${v.collisions} cell collisions`;
-  }
-  el.textContent = line;
-}
-
-// Validation: read the final LUT back and check that each real anchor's
-// 6 face-neighbours in the cube are perceptually close to the anchor
-// (Euclidean distance in OkLab). After stamping, the anchor cell itself
-// is exact — divergence at its neighbours signals the surrounding pass
-// (IDW blend / stripe stamp / blur) produced something inconsistent
-// with the palette. Reports avg + max ΔE across all (anchor, neighbour)
-// pairs. Single round-trip per z-slice that any anchor touches.
-function validateAnchorNeighbours(){
-  const gl = state.gl;
-  if (!gl || !state.lutTex || !state.lutFbo) return null;
-  const N = state.lutN;
-  const seeds = paletteSeeds();   // all anchors (real + synthetic) are stamped
-  if (seeds.length === 0 || N < 2) return null;
-
-  // Collect z-slices we need (anchor li ± 1). Detect cell collisions:
-  // when two anchors round to the same (li, ai, bi), only the last
-  // stamp wins, so the first anchor ends up holding the wrong Lab —
-  // that's the "not all anchors are at their value" symptom.
-  const neededLi = new Set();
-  const anchors = [];
-  const cellMap = new Map();
-  let collisions = 0;
-  const collisionPairs = [];
-  for (const s of seeds){
-    const li = Math.round(s.L * (N - 1));
-    const ai = Math.round((s.a + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-    const bi = Math.round((s.b + LUT_AB_RANGE) / (2 * LUT_AB_RANGE) * (N - 1));
-    if (li < 0 || li >= N || ai < 0 || ai >= N || bi < 0 || bi >= N) continue;
-    const key = li * N * N + bi * N + ai;
-    const prev = cellMap.get(key);
-    if (prev !== undefined){
-      collisions++;
-      if (collisionPairs.length < 4) collisionPairs.push([prev, anchors.length]);
-    }
-    cellMap.set(key, anchors.length);
-    anchors.push({ s, li, ai, bi });
-    if (li - 1 >= 0) neededLi.add(li - 1);
-    neededLi.add(li);
-    if (li + 1 < N) neededLi.add(li + 1);
-  }
-  if (anchors.length === 0) return null;
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, state.lutFbo);
-  const slices = new Map();
-  for (const li of neededLi){
-    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, state.lutTex, 0, li);
-    const out = new Float32Array(N * N * 4);
-    gl.readPixels(0, 0, N, N, gl.RGBA, gl.FLOAT, out);
-    slices.set(li, out);
-  }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-  const offsets = [
-    [-1, 0, 0], [1, 0, 0],
-    [0, -1, 0], [0, 1, 0],
-    [0, 0, -1], [0, 0, 1],
-  ];
-  // Self-check: anchor cell should hold the anchor's exact Lab after
-  // the post-build stamps. ΔE > epsilon at any anchor's own cell
-  // means either a collision (another anchor overwrote it) or a stamp
-  // somewhere wasn't applied.
-  let maxDE = 0, sumDE = 0, count = 0, worst = -1;
-  let maxSelfDE = 0, missing = 0;
-  const EPS = 1e-3;
-  for (let k = 0; k < anchors.length; k++){
-    const { s, li, ai, bi } = anchors[k];
-    const slice = slices.get(li);
-    if (slice){
-      const i = (bi * N + ai) * 4;
-      const dL = slice[i]   - s.L;
-      const dA = slice[i+1] - s.a;
-      const dB = slice[i+2] - s.b;
-      const dSelf = Math.sqrt(dL*dL + dA*dA + dB*dB);
-      if (dSelf > maxSelfDE) maxSelfDE = dSelf;
-      if (dSelf > EPS) missing++;
-    }
-    let aMax = 0;
-    for (const [dl, da, db] of offsets){
-      const nli = li + dl, nai = ai + da, nbi = bi + db;
-      if (nli < 0 || nli >= N || nai < 0 || nai >= N || nbi < 0 || nbi >= N) continue;
-      const nSlice = slices.get(nli);
-      if (!nSlice) continue;
-      const i = (nbi * N + nai) * 4;
-      const dL = nSlice[i]   - s.L;
-      const dA = nSlice[i+1] - s.a;
-      const dB = nSlice[i+2] - s.b;
-      const dE = Math.sqrt(dL*dL + dA*dA + dB*dB);
-      if (dE > aMax) aMax = dE;
-      sumDE += dE;
-      count++;
-    }
-    if (aMax > maxDE){ maxDE = aMax; worst = k; }
-  }
-  return {
-    avgDE: count > 0 ? sumDE / count : 0,
-    maxDE,
-    count,
-    worstAnchorIndex: worst,
-    collisions,
-    collisionPairs,
-    missing,
-    maxSelfDE,
-    totalAnchors: anchors.length,
-  };
 }
 
 /* =========================================================
@@ -2240,11 +2140,11 @@ void main(){
 // palette spacing). Second accumulates the chroma-preserving blend.
 const FS_LUT_BUILD = `#version 300 es
 precision highp float;
-// MRT: two intermediates from one dispatch (the expensive IDW loop runs once).
-//   o0 = step 1 — IDW core + hue-gate safety net, preserve-neutral, no envelope
-//   o1 = step 2 — + cPreserve/lPreserve + envelope clamp (the LUT the pipeline uses)
-layout(location = 0) out vec4 o0;
-layout(location = 1) out vec4 o1;
+// Step 1 only: IDW core + hue-gate safety net, preserve-neutral, no envelope.
+// Step 2 (preserve + envelope) is a separate pass (FS_LUT_STEP2) that reads
+// THIS output — optionally after the step-1 blur — so step 2 sees the smoothed
+// IDW core. One IDW loop per build.
+out vec4 fragColor;
 
 uniform sampler2D uSeeds;     // MAX_PAL × 1, rgb=Lab, a=strength
 uniform int   uPalN;
@@ -2257,8 +2157,6 @@ uniform float uSoftness;      // IDW power exponent
 // separation is the "borrow luma / keep colour" decoupling.
 uniform vec3  uWLuma;         // (wL, wC, wH) for the luma blend metric
 uniform vec3  uWHue;          // (wL, wC, wH) for the chroma/hue blend metric
-uniform float uLPreserve;        // 0 = snap L to anchor, 1 = passthrough cell L
-uniform float uCPreserve;        // 0 = snap chroma to anchor, 1 = passthrough cell C
 uniform float uHueGate;       // Hue-fidelity safety net: value at 90° AND
                               // (derived) cosine of the kill-cone edge =
                               // -uHueGate. 0 → kills 90°+; 1 → only 180°
@@ -2266,16 +2164,7 @@ uniform float uHueGate;       // Hue-fidelity safety net: value at 90° AND
                               // kill cone widen together.
 uniform float uChromaGate;   // 1 = fade near-grey texels toward grey (safety
                               // net); 0 = keep their chroma (toggle off).
-// Envelope extensions — floor (Lo) and ceil (Hi) handles of a dual-thumb
-// slider. Each EXTENDS the per-hue curve bound outward on its side; at the max
-// (L: 1, C: LUT_AB_RANGE) the band covers the full range so that side is a
-// noop (= old toggle off). Smaller = tighter clamp at the curve bound.
-uniform float uLExtLo;        // floor: clamp lab.x to envLLo - uLExtLo
-uniform float uLExtHi;        // ceil:  clamp lab.x to envLHi + uLExtHi
-uniform float uCExtLo;        // floor: clamp outC  to envCLo - uCExtLo
-uniform float uCExtHi;        // ceil:  clamp outC  to envCHi + uCExtHi
 uniform float uAbRange;       // OkLab a/b half-range (matches LUT_AB_RANGE)
-uniform sampler2D uHueLCCurve;// 32×1 RGBA32F: rgba = (L_lo, L_hi, C_lo, C_hi) at hue
 
 // Soft min/max: smooth analytic alternatives to min()/max() so the envelope
 // clamp doesn't create a visible step where the input crosses the bound.
@@ -2404,46 +2293,69 @@ void main(){
     gate = ct * opposeChroma;
   }
 
-  // --- step 1 (o0): IDW core. cPreserve/lPreserve neutral, no
-  //     envelope. Chroma = the 1c rescale (target) × gate; Luma = IDW luma. ---
-  o0 = vec4(lab.x, dir * (target * gate), 1.0);
+  // Step 1: IDW core. cPreserve/lPreserve neutral, no envelope.
+  // Chroma = the 1c rescale (target) × gate; Luma = IDW luma.
+  fragColor = vec4(lab.x, dir * (target * gate), 1.0);
+}`;
 
-  // --- step 2 (o1): cPreserve + lPreserve + envelope clamp ---
-  // cPreserve GATED by coherence so anchor disagreement (low coh) does not
-  // amplify the noisy blend direction into a confident wrong hue.
-  float finalMag = mix(target, cellC, uCPreserve * coherence);
-  vec3  lab2 = vec3(mix(lab.x, L, uLPreserve), dir * (finalMag * gate));
-  // Per-channel envelope clamp anchored to a hue-interpolated (L, C) band:
-  // bounds come from Gaussian-weighted mean ± √3·std of palette anchors at this
-  // hue, so the band width tracks local anchor spread. uLExtLo/uLExtHi (and
-  // uCExtLo/uCExtHi) EXTEND the floor/ceil outward; at max that side covers the
-  // full range → noop. Beyond the edge the value compresses into a skirt via
-  // boundary ± softW·(1 - exp(-over/softW)).
+// FS_LUT_STEP2 — applies cPreserve / lPreserve + per-channel envelope clamp on
+// top of the (possibly blurred) step 1 LUT. Sampling lutTexStep1 lets the step 1
+// blur smooth the IDW core before preserve/envelope re-anchors it to the cell's
+// identity and clamps it into the per-hue band.
+const FS_LUT_STEP2 = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+out vec4 fragColor;
+
+uniform sampler3D uLutIn;     // step 1 LUT (raw IDW or post step-1 blur)
+uniform float uN;
+uniform float uZ;
+uniform float uAbRange;
+uniform float uLPreserve;
+uniform float uCPreserve;
+uniform float uLExtLo;
+uniform float uLExtHi;
+uniform float uCExtLo;
+uniform float uCExtHi;
+uniform sampler2D uHueLCCurve;
+
+void main(){
+  float N  = uN;
+  float ai = floor(gl_FragCoord.x);
+  float bi = floor(gl_FragCoord.y);
+  float li = uZ;
+  float L  = li / (N - 1.0);
+  float a  = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
+  float b  = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
+  vec3  uvw = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
+  vec3  lab1 = texture(uLutIn, uvw).rgb;   // step 1: (L_idw, dir*target*gate)
+
+  float magAB = length(lab1.yz);
+  vec2  dir   = (magAB > 1e-6) ? lab1.yz / magAB : vec2(0.0);
+  float cellC = length(vec2(a, b));
+
+  // cPreserve mix (no coherence — that info is lost post-blur; the blur already
+  // smoothed disagreement, so cPreserve runs on the smoothed magnitude).
+  float finalMag = mix(magAB, cellC, uCPreserve);
+  vec3  lab2 = vec3(mix(lab1.x, L, uLPreserve), dir * finalMag);
+
+  // Per-channel envelope clamp anchored to a hue-interpolated (L, C) band.
   const float PI = 3.14159265359;
-  // Look the envelope band up by the OUTPUT hue (the assigned palette hue), not
-  // the input cell's (a,b) — the latter is ambiguous near the grey axis / at
-  // L≈0/1, giving a wrong band. Matches the late re-assert pass.
   float hueT = atan(lab2.z, lab2.y) / (2.0 * PI) + 0.5;
-  vec4 envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
+  vec4  envHue = texture(uHueLCCurve, vec2(hueT, 0.5));
   float envLLo = envHue.r, envLHi = envHue.g;
-  float envCLo = envHue.b, envCHi = envHue.a;
+  float envCHi = envHue.a;
   const float L_SKIRT = 0.10;
   const float C_SKIRT = 0.04;
   float lHi = envLHi + uLExtHi;
   float lLo = envLLo - uLExtLo;
-  // COMPRESS the out-of-band luma into a skirt of width L_SKIRT — monotonic in
-  // lab2.x, so input-luma ORDERING is preserved and below-floor cells stay
-  // BELOW the floor (no overbrightening of dark/tannish interpolated cells);
-  // above-ceil stay above. The whole outside range squeezes into ±L_SKIRT.
   if (lab2.x > lHi){ float over = lab2.x - lHi; lab2.x = lHi + L_SKIRT * (1.0 - exp(-over / L_SKIRT)); }
   else if (lab2.x < lLo){ float under = lLo - lab2.x; lab2.x = lLo - L_SKIRT * (1.0 - exp(-under / L_SKIRT)); }
   float outC = length(lab2.yz);
   float cHi = envCHi + uCExtHi;
-  // Chroma FLOOR — a minimum saturation that PEAKS at mid-L and tapers to 0 at
-  // the L extremes (no gamut room near black/white), nonlinearly. Strength is
-  // the floor thumb: cExtLo 1 = off, 0 = floor up to the per-hue chroma ceil.
-  float lW = 4.0 * lab2.x * (1.0 - lab2.x);   // 0 at L=0/1, 1 at L=0.5
-  lW = lW * lW * lW;                           // cubed → compressed center, more room for bright/dark
+  // Chroma floor — peaks at mid-L, fades at extremes.
+  float lW = 4.0 * lab2.x * (1.0 - lab2.x);
+  lW = lW * lW * lW;
   float floorFrac = clamp(1.0 - uCExtLo / max(uAbRange, 1e-6), 0.0, 1.0);
   float cLo = floorFrac * envCHi * lW;
   float newC = outC;
@@ -2455,7 +2367,7 @@ void main(){
     newC = max(0.0, cLo - C_SKIRT * (1.0 - exp(-under / C_SKIRT)));
   }
   if (outC > 1e-6) lab2.yz *= newC / outC;
-  o1 = vec4(lab2, 1.0);
+  fragColor = vec4(lab2, 1.0);
 }`;
 
 // LUT anchor stamp: writes a single LUT cell to exactly the anchor's Lab. Used
@@ -2782,7 +2694,8 @@ out vec4 fragColor;
 uniform sampler3D uLutIn;
 uniform sampler2D uSeeds;
 uniform int   uPalN;
-uniform float uReach;
+uniform float uReachL;
+uniform float uReachC;
 uniform float uN;
 uniform float uZ;
 uniform float uAbRange;
@@ -2795,19 +2708,20 @@ void main(){
   float b_in = -uAbRange + (bi / max(N - 1.0, 1.0)) * (2.0 * uAbRange);
   vec3  uvw  = vec3((ai + 0.5) / N, (bi + 0.5) / N, (uZ + 0.5) / N);
   vec3  lab  = texture(uLutIn, uvw).rgb;
+  // Normalised anchor distance: luma axis scaled by 1/reachL, hue/chroma axes
+  // by 1/reachC. r2 < 1 → inside the elliptical reach; r2 > 1 → desaturate.
+  float invRL2 = 1.0 / max(uReachL * uReachL, 1e-9);
+  float invRC2 = 1.0 / max(uReachC * uReachC, 1e-9);
   float dmin2 = 1e30;
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
-    float dL = (L_in - s.x) * 0.35, dA = a_in - s.y, dB = b_in - s.z;
-    float d2 = dL * dL + dA * dA + dB * dB;
+    float dL = L_in - s.x, dA = a_in - s.y, dB = b_in - s.z;
+    float d2 = dL * dL * invRL2 + (dA * dA + dB * dB) * invRC2;
     if (d2 < dmin2) dmin2 = d2;
   }
-  // L down-weighted (×0.35) above so reach measures mostly hue/chroma coverage,
-  // not brightness — otherwise saturation gaps appear across L (mid-darks
-  // desaturated while nearby-anchor darks stay coloured).
-  float r2 = dmin2 / max(uReach * uReach, 1e-9);
-  lab.yz *= exp(-max(r2 - 1.0, 0.0));
+  // dmin2 is already in normalised reach² units (1.0 = on the reach surface).
+  lab.yz *= exp(-max(dmin2 - 1.0, 0.0));
   fragColor = vec4(lab, 1.0);
 }`;
 
@@ -2881,6 +2795,7 @@ function initGL(){
 
   state.programs.perPixel = program(VS, FS_PER_PIXEL);
   state.programs.lutBuild = program(VS, FS_LUT_BUILD);
+  state.programs.lutStep2 = program(VS, FS_LUT_STEP2);
   state.programs.lutBlur  = program(VS, FS_LUT_BLUR);
   state.programs.lutStamp = program(VS, FS_LUT_STAMP);
   state.programs.lutStampSoft = program(VS, FS_LUT_STAMP_SOFT);
@@ -3161,6 +3076,10 @@ function loadShooterImage(){
   loadImageFromSource('images/shooter.jpg', 'screenshot — Xonotic 0.8.2 (FPS)',
     _cred('Team Xonotic', 'gpl', 'https://commons.wikimedia.org/wiki/File:Xonotic_0.8.2_rocket.jpg'));
 }
+function loadCandyImage(){
+  loadImageFromSource('images/fortnite-c4.jpg', 'screenshot — Fortnite (candy lights)',
+    _cred('Epic Games', 'free', 'https://www.hardwareinside.de/'));
+}
 
 function updateImageInfo(){
   const el = document.getElementById('imageInfo');
@@ -3225,15 +3144,17 @@ function buildHuePreviewSrc(){
   return _smoothHueRing(buf, W, H, 4);
 }
 
-// Chroma ramp: x = hue (atan2 sweep), y = chroma (top = max → bottom = grey),
-// at a FIXED mid L. Companion to the hue picker (which ramps L) — lets the
-// step-2 chroma envelope be read off directly (the high-chroma top clamps).
+// Chroma ramp: x = hue, y = chroma (top = max → bottom = grey), at a FIXED
+// mid L. Companion to the hue picker (which ramps L); together they read the
+// step-2 envelope (luma ceil/floor + chroma cap). Hue axis matches the hue
+// preview exactly: x=0 → red (0°), sweeping forwards to x=W → red (360°), so
+// columns line up vertically across the two strips.
 function _fillChromaRamp(W, H, d){
   const L = 0.65, Cmax = 0.30;
   for (let y = 0; y < H; y++){
     const C = (1 - y / (H - 1)) * Cmax;
     for (let x = 0; x < W; x++){
-      const h   = (x / (W - 1)) * 2 * Math.PI - Math.PI;
+      const h   = (x / W) * 2 * Math.PI;
       const lin = oklabToLinearJS(L, C * Math.cos(h), C * Math.sin(h));
       const i = (y * W + x) * 4;
       d[i]   = Math.round(linearToSrgbC(Math.max(0, Math.min(1, lin[0]))) * 255);
@@ -3466,8 +3387,13 @@ function _overlayChromaRampEnvelope(ctx, W, H){
   const BINS = HUE_ENV_BINS, Cmax = 0.30, R = LUT_AB_RANGE, L = 0.65;
   let lW = 4 * L * (1 - L); lW = lW * lW * lW;
   const cExtLo = state.params.cExtLo, cExtHi = state.params.cExtHi;
+  // Bin layout: bin i corresponds to OkLab hue ((i+0.5)/BINS · 2π − π) ∈ [−π, π].
+  // Chroma-ramp source uses h = (x/W) · 2π ∈ [0, 2π], so shift the compass by
+  // +0.5 (= π) before indexing: hueT = (x/W + 0.5) mod 1. Matches the hue×L
+  // envelope overlay's compass convention.
   const envCHi = x => {
-    const hueT = x / (W - 1), f = hueT * BINS - 0.5;
+    const hueT = ((x / W) + 0.5) % 1;
+    const f    = hueT * BINS - 0.5;
     const i0 = ((Math.floor(f) % BINS) + BINS) % BINS, i1 = (i0 + 1) % BINS;
     const u = f - Math.floor(f);
     return curve[i0*4+3] * (1 - u) + curve[i1*4+3] * u;
@@ -3528,9 +3454,33 @@ function renderStagePreview(canvasId, lutTex, strength, drawEnvelope, srcTex){
   }
   const dst = _renderHueThroughLut(ctx, lutTex, strength, srcTex);
   if (drawEnvelope) _overlayHueEnvelope(ctx, W, H);
-  // Chroma-ramp source: draw the CHROMA envelope (its y-axis is chroma), then
-  // stop — anchor markers/L overlay assume a hue×L strip and would be misplaced.
-  if (srcTex === state.chromaPreviewTex){ _overlayChromaRampEnvelope(ctx, W, H); return; }
+  // Chroma-ramp source: chroma envelope + anchor markers positioned by
+  // (hue, chroma) — this strip's axes — then stop (the L-positioned markers
+  // below assume a hue×L strip).
+  if (srcTex === state.chromaPreviewTex){
+    _overlayChromaRampEnvelope(ctx, W, H);
+    const Cmax = 0.30;
+    const ms = (state.lutSeeds && state.lutSeeds.length)
+      ? state.lutSeeds.map(s => [s.L, s.a, s.b])
+      : state.palette.map(p => { const [r,g,b] = hexToRgb(p.hex); return rgbToOklab(r, g, b); });
+    for (const lab of ms){
+      const C = Math.hypot(lab[1], lab[2]);
+      if (C < 0.002) continue;                       // grey: no hue position here
+      let hueDeg = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+      if (hueDeg < 0) hueDeg += 360;
+      const x = (hueDeg / 360) * W;
+      const y = (1 - Math.min(1, C / Cmax)) * (H - 1);
+      const xi = Math.max(0, Math.min(W - 1, Math.round(x)));
+      const yi = Math.max(0, Math.min(H - 1, Math.round(y)));
+      const o = (yi * W + xi) * 4;
+      const lin = oklabToLinearJS(lab[0], lab[1], lab[2]);
+      const rC = v => Math.max(0, Math.min(255, Math.round(linearToSrgbC(Math.max(0, Math.min(1, v))) * 255)));
+      ctx.beginPath(); ctx.arc(x, y, 4.2, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 3.6, 0, Math.PI * 2); ctx.fillStyle = `rgb(${rC(lin[0])},${rC(lin[1])},${rC(lin[2])})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fillStyle = `rgb(${dst[o]},${dst[o+1]},${dst[o+2]})`; ctx.fill();
+    }
+    return;
+  }
   if (srcTex) return;
   // Anchor markers: x ← hue (0..360°), y ← L (top = bright, bot = dark).
   // Fill = the stage result sampled at that pixel (dot blends with the output
@@ -3697,11 +3647,7 @@ function render(){
   gl.uniform1i(gl.getUniformLocation(prog, 'uImg'), 0);
 
   // unit 1 → 3D LUT (only meaningful when palN > 0; shader gates on uPalN).
-  // Debug: lutStage picks which pipeline stage's LUT drives the image —
-  // 1 = step-1 core, 2 = + preserve/envelope, 3 = final (default).
-  const stageTex = p.lutStage === 1 ? (state.lutTexStep1 || state.lutTex)
-                 : p.lutStage === 2 ? (state.lutTexStep2 || state.lutTex)
-                 : state.lutTex;
+  const stageTex = state.lutTex;
   if (stageTex){
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_3D, stageTex);
@@ -3984,6 +3930,7 @@ function init(){
   bindImageBtn('mangaImage',     loadMangaImage);
   bindImageBtn('strategyImage',  loadStrategyImage);
   bindImageBtn('shooterImage',   loadShooterImage);
+  bindImageBtn('candyImage',     loadCandyImage);
 
   // Palette buttons
   document.getElementById('addColor').addEventListener('click', () => {
@@ -4074,8 +4021,14 @@ function init(){
   function bindBaryTriangle(canvasId, key){
     const cv = document.getElementById(canvasId);
     if (!cv) return;
-    const ctx = cv.getContext('2d');
+    // Backing-store oversample so the CSS width:100% upscale doesn't blur the
+    // corner labels / outlines. Logical drawing units stay at the HTML w/h.
     const W = cv.width, H = cv.height, pad = 16;
+    const SCALE = 2 * Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    cv.width  = W * SCALE;
+    cv.height = H * SCALE;
+    const ctx = cv.getContext('2d');
+    ctx.scale(SCALE, SCALE);
     const VL = [W / 2, pad], VA = [pad, H - pad], VB = [W - pad, H - pad];
     const det = (VA[1] - VB[1]) * (VL[0] - VB[0]) + (VB[0] - VA[0]) * (VL[1] - VB[1]);
     // No coordinate may hit 0 (a zeroed axis = degenerate metric). Confine the
@@ -4107,8 +4060,8 @@ function init(){
       ctx.beginPath(); ctx.moveTo(IL[0],IL[1]); ctx.lineTo(IA[0],IA[1]); ctx.lineTo(IB[0],IB[1]); ctx.closePath();
       ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '9px monospace';
-      ctx.textAlign = 'center'; ctx.fillText('L', VL[0], VL[1] - 4);
-      ctx.fillText('C', VA[0], VA[1] + 10); ctx.fillText('H', VB[0], VB[1] + 10);
+      ctx.textAlign = 'center'; ctx.fillText('luma', VL[0], VL[1] - 4);
+      ctx.fillText('chroma', VA[0], VA[1] + 10); ctx.fillText('hue', VB[0], VB[1] + 10);
       const p = pin(state.params[key] || [1/3,1/3,1/3]);
       ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(120,230,170,0.95)'; ctx.fill();
@@ -4164,8 +4117,10 @@ function init(){
       scheduleLumaLookRefresh();
     });
   })();
-  bindLutSlider('reach',      'vReach',      'reach',      v => v.toFixed(2));
-  bindLutSlider('smoothness', 'vSmoothness', 'smoothness', v => v.toFixed(0));
+  bindLutSlider('reachL',          'vReachL',          'reachL',          v => v.toFixed(2));
+  bindLutSlider('reachC',          'vReachC',          'reachC',          v => v.toFixed(2));
+  bindLutSlider('smoothness',      'vSmoothness',      'smoothness',      v => v.toFixed(0));
+  bindLutSlider('step1Smoothness', 'vStep1Smoothness', 'step1Smoothness', v => v.toFixed(0));
   // Envelope dual-thumb: floor (Lo) + ceil (Hi) extension, independent thumbs.
   function bindDualRange(loId, hiId, loLblId, hiLblId, loKey, hiKey, fmt){
     const lo = document.getElementById(loId), hi = document.getElementById(hiId);
@@ -4198,20 +4153,10 @@ function init(){
       scheduleLutRebuild();
     });
   }
-  // Anchor stamp strength changes the LUT → rebuild. The env-viz overlays only
-  // draw on the previews → just re-render them.
-  bindLutSlider('stampStrength', 'vStampStrength', 'stampStrength', v => v.toFixed(2));
+  // stampStrength UI removed; state.params.stampStrength held at 0.5 default.
   bindLutSlider('chromaGate', 'vChromaGate', 'chromaGate', v => v.toFixed(2));
   // Envelope viz toggles removed: state.params.debugEnvVizL / debugEnvVizC
   // stay hardcoded to true in defaults so the rendering gates always pass.
-  // Debug: which stage LUT drives the test image. Just re-renders (LUTs for all
-  // stages are already built) — no rebuild, no preset clear.
-  (() => {
-    const el = document.getElementById('lutStage');
-    if (!el) return;
-    el.value = String(state.params.lutStage);
-    el.addEventListener('change', () => { state.params.lutStage = parseInt(el.value, 10) || 3; requestRender(); });
-  })();
 
   // LUT-slice L picker (diagnostic) — re-renders the slice preview only.
   (function bindLutSliceL(){
@@ -4236,21 +4181,11 @@ function init(){
   // Soft / balanced / vivid step between the two ends.
   // Preset object key order, sliderMap key order, and PRESET_KEYS list below
   // all mirror the UI / pipeline order — easier to compare entries by eye.
+  // Single default preset bound to the reset (↺) icon in the lut-params title.
+  // Every numeric knob lands at 0.5 mid; softness exponent 4.5 (slider display
+  // 6.5); blur/step1 off; triangles reset to centroid by applyLutPreset.
   const lutPresets = {
-    // Three presets that differ ONLY by softness. Stored as IDW Shepard
-    // exponent (state.params.softness); slider DISPLAY value = 11 − exponent.
-    //   soft     → display 8   (gentlest IDW), exponent 3
-    //   balanced → display 6.5 (middle),       exponent 4.5
-    //   hard     → display 3   (Voronoi snap), exponent 8
-    // All other params identical: hueGate 0.5, preserve 0.5, envelope at 0.5,
-    // late stages same. (Triangles aren't preset-driven.)
-    'soft':     { hueGate: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
-    'balanced': { hueGate: 0.5, softness: 4.5, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
-    'hard':     { hueGate: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25 },
-    // 'tone' = recolour preset: luma sticks to source brightness (wLuma at L
-    // vertex), colour blend ignores luma (wHue split between C and H). Other
-    // params inherit balanced settings.
-    'tone':     { hueGate: 0.5, softness: 4.5, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, reach: 0.5, lumaLook: 0.25, wLuma: [1.0, 0.0, 0.0], wHue: [0.0, 0.5, 0.5] },
+    'balanced': { lutSize: 33, hueGate: 0.5, chromaGate: 0.5, wLuma: [0.50, 0.25, 0.25], wHue: [0.20, 0.40, 0.40], softness: 4.5, step1Smoothness: 3, lPreserve: 1.0, cPreserve: 0.1, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, stampStrength: 0.5, reachL: 0.5, reachC: 0.5, lumaLook: 0, lutStrength: 1.0 },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
@@ -4258,10 +4193,12 @@ function init(){
     // softness has a bespoke inverted handler — not in this map
     lPreserve:  ['lPreserve',  'vLPreserve',  v => v.toFixed(2)],
     cPreserve:  ['cPreserve',  'vCPreserve',  v => v.toFixed(2)],
+    step1Smoothness: ['step1Smoothness', 'vStep1Smoothness', v => v.toFixed(0)],
     smoothness: ['smoothness', 'vSmoothness', v => v.toFixed(0)],
-    reach:      ['reach',      'vReach',      v => v.toFixed(2)],
+    reachL:     ['reachL',     'vReachL',     v => v.toFixed(2)],
+    reachC:     ['reachC',     'vReachC',     v => v.toFixed(2)],
     lumaLook:   ['lumaLook',   'vLumaLook',   v => v.toFixed(2)],
-    stampStrength: ['stampStrength', 'vStampStrength', v => v.toFixed(2)],
+    // stampStrength: UI removed; not in sliderMap so applyLutPreset can't refresh it.
   };
   // Dual-thumb envelope ranges: [loKey, hiKey, loInput, hiInput, loLbl, hiLbl].
   const dualRanges = [
@@ -4323,6 +4260,13 @@ function init(){
   document.querySelectorAll('[data-lutpreset]').forEach(btn => {
     btn.addEventListener('click', () => applyLutPreset(btn.dataset.lutpreset));
   });
+  // Reset (↺) icon in the h2 — applies the default preset and stops the click
+  // from bubbling to the h2's collapse handler.
+  const resetBtn = document.getElementById('resetLutParams');
+  if (resetBtn) resetBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    applyLutPreset('balanced');
+  });
 
   // Copy/load custom presets: serialize the LUT-relevant subset of
   // state.params to a JSON blob. Lets users save a tuned look, share it,
@@ -4339,11 +4283,11 @@ function init(){
     'lPreserve', 'cPreserve',
     // Envelope clamp — dual-thumb floor/ceil extensions
     'lExtLo', 'lExtHi', 'cExtLo', 'cExtHi',
-    // Shared late stages
-    'smoothness', 'reach', 'lumaLook',
+    // Step 1 finish blur, then shared late stages
+    'step1Smoothness', 'smoothness', 'reachL', 'reachC', 'lumaLook',
     // Final per-pixel
     'lutStrength',
-    // Anchor stamp
+    // Anchor stamp (no UI, but kept here so saved presets capture it)
     'stampStrength',
   ];
   function serializeLutPreset(){
@@ -4469,6 +4413,7 @@ function init(){
     for (const el of [extendLWrap, extendCWrap, extendHWrap]){
       el.style.opacity = op;
       el.style.pointerEvents = pe;
+      el.classList.toggle('disabled', !on);
     }
     if (extendLabel) extendLabel.textContent = on ? 'on' : 'off';
     updateExtendStatus();

@@ -24,7 +24,7 @@ const errors = [];
 const fail = (m) => errors.push(m);
 
 // 1. Inline-script syntax via `node --check`.
-const m = html.match(/\n<script>\n([\s\S]*?)\n<\/script>/);
+const m = html.match(/\r?\n<script>\r?\n([\s\S]*?)\r?\n<\/script>/);
 if (!m) {
   fail('could not locate the inline <script> block');
 } else {
