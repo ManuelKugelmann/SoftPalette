@@ -12,39 +12,40 @@ SoftPalette turns a handful of colors into a smooth color grade.
 - Drop an image (or paste with Ctrl+V, or click to browse) — or pick a built-in
   test image (including the hue and chroma ramps).
 - Pick a palette: use a preset or hand-roll.
+- Adjust params
 - The grade applies live to the canvas. Inspect
   before / after split.
 
 ## Use cases
-- Stylize photos to a game / film palette (Quake, Moebius|Ghibli, Old CRT, …).
+- Stylize photos to a palette.
 - Map a moodboard's palette onto reference photos.
 - A consistent look across many images from one palette.
+- Realtime color grading LUT for a game or movie.
 - Explore how a palette feels in continuous tone.
 
 ## How it works
-SoftPalette builds a 3D LUT and maps the image through it on the GPU. 
-Base is a soft 3D Voronoi via Shepard IDW — 
-each cell is a distance-weighted blend of the palette anchors,
-kept vivid where anchors agree on a hue and easing toward grey where they don't. 
-Additional steps adjust luma and chroma ramps, envelopes, smoothness, reach, etc.
+SoftPalette builds a 3D LUT that maps the image colors to new colors. 
+The base is a soft 3D Voronoi via Shepard IDW — 
+each cell is a distance-weighted blend of the palette anchors.
+Additional steps adjust luma and chroma ramps, envelopes, smoothness, reach, ...
 
 ## Controls
-The LUT params card runs top → bottom in pipeline order.
+The LUT params are top to bottom in processing order.
 
 | **Global** | |
 |---|---|
-| lut size | 17³ → 257³ cube. Higher = more precise, slightly slower |
-| hue gate | Opposing-hue safety net — curbs confidently-wrong hues |
-| chroma gate | Near-grey desaturation. 1 = keep chroma, 0 = full desat |
+| lut size | 17³ → 129³ cube. Higher = more precise, slightly slower |
+| hue gate | opposing-hue safety net |
+| chroma gate | low-chroma hue noise safety net |
 | **Step 1** | **interpolate anchors**  |
-| luma blend (triangle) | weighting of anchors that drive each cell's luma |
-| hue blend (triangle) |  weighting of anchors that drive each cell's hue |
-| anchor softness | blend sharpness (low = soft, high = near-Voronoi) |
+| luma blend (triangle) | axis based weighting of anchors that drive each cell's luma |
+| color blend (triangle) | axis based weighting of anchors that drive each cell's hue and chroma |
+| anchor softness | interpolation sharpness  |
 | blur | smoothing iterations |
 | **Step 2** | **restore luma and chroma ramp, bounded by palette envelope** |
-| luma / chroma preserve | keep interpolated palette values (0) or keep identity ramp (1) |
-| luma / chroma envelope | how far output may leave the palette's per-hue range (0 = clamp at the band, 1 = no limit) |
+| luma / chroma preserve | keep raw interpolated palette values or keep luma / chroma ramp |
+| luma / chroma envelope | how far output may leave the palette's per-hue envelope |
 | **Step 3** | **effects** |
 | blur | smoothing iterations |
 | reach | distance beyond which colors desaturate |
-| lut blend | mix the result with the original (100 % = full effect) |
+| lut blend | mix the result with the identity LUT |
