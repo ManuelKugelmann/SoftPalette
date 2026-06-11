@@ -2,123 +2,111 @@
 
 ## Style
 
-Telegram. Fragments, no preambles, no recap, no apologies. Drop
-articles. Results > narration. Same style in this file.
+Telegram. Fragments, no preambles, no recap, no apologies. Drop articles.
+Results > narration. Same in this file.
 
 ## Build timestamp
 
-Auto-bumped by `.githooks/pre-commit` (`scripts/sync-build-timestamp.sh`)
-+ server fallback `.github/workflows/sync-build-timestamp.yml`. Don't
-edit literals. Install hook: `git config core.hooksPath .githooks`.
+Auto-bumped by `.githooks/pre-commit` (`scripts/sync-build-timestamp.sh`) +
+server fallback `.github/workflows/sync-build-timestamp.yml`. Don't edit the
+literals. Install hook: `git config core.hooksPath .githooks`.
 
-## Branch + push
+## Git
 
-`claude/extend-256-color-palette-b6Lmh`. `git push -u origin <branch>`.
-`PostToolUse` hook emits `githack` URL after push.
+Work on `main`; commit + push there. The pre-commit hook bumps the timestamp,
+so `git pull --rebase` after a commit usually hits a 1-line `index.html`
+conflict (timestamp, + CRLF under `core.autocrlf`). Resolve:
+`git checkout --theirs -- index.html && sed -i 's/\r$//' index.html && git add
+index.html && GIT_EDITOR=true git rebase --continue`, then push. `PostToolUse`
+hook emits a `githack` URL after push.
 
 ## Algorithm
 
-Soft 3D Voronoi LUT in OkLab. Single build method (IDW Shepard), shared
-post-build late stages. (Stripes was removed — one algo.)
+Soft 3D Voronoi LUT in OkLab. ONE build method (IDW Shepard) + shared late
+stages. OkLab: Luma=`lab.x`, Chroma=`length(lab.yz)`, Hue=`atan2(lab.z,lab.y)`;
+Chroma absolute, not Saturation. "anchor" = palette seed (real OR synthetic —
+treated identically everywhere). "LUT texel" = N³ cell at (L,a,b).
 
-**Terms.** "LUT texel" = N³ cube cell at (L, a, b). "anchor" = palette
-seed. Voronoi cells implicit. OkLab: Luma=`lab.x`, Chroma=`length(lab.yz)`,
-Hue=`atan2(lab.z, lab.y)`. Chroma absolute, not Saturation.
+**Steps.** step1 = interpolate anchors; step2 = restore L/C ramps under
+envelope; step3 = effects. Params stay in their step.
+**Global tier** (top UI, own separators): `lutSize` + `hueGate` + `chromaGate`.
 
-**Step ownership.** step1 = interpolate anchors; step2 = restore L/C ramps
-under envelope; step3 = effects on top. Params stay in their step (audited).
-**Global tier** (top UI section, below the preset buttons, own separators —
-not step-scoped): `lutSize` + `hueGate` + `chromaGate`.
+### Build — `FS_LUT_BUILD`, per texel per L-slice, MRT
 
-**Sliders.**
-- `hueGate` — GLOBAL opposing-hue safety net. `FS_LUT_BUILD` (step 1) AND
-  `FS_LUT_BLUR` (step 3). `mix(-0.3,-0.97,hueGate)` cos cutoff; faded off near
-  grey by a chroma-confidence ramp (no pinwheel feathering). UI [0,1], def 0.5.
-- `chromaGate` — GLOBAL near-grey desat net. `mix(smoothstep,1.0,chromaGate)`:
-  **1 = max relaxation (keep chroma)**, 0 = full desat. UI [0,1], def 0.5.
-- `wLuma` / `wHue` — two **barycentric L/C/H** anchor-distance metrics (draggable
-  triangle widgets, replace lRange/abRange/hRange). `wLuma` = WEIGHTING (luma
-  blend); `wHue` = DECOUPLING (chroma/hue blend); their separation = luma↔colour
-  decoupling. C/H via projection onto the anchor's hue axis (stable at grey, no
-  atan). Each `[wL,wC,wH]` sums to 1, clamped ≥0.06 (tinted border bar); def centroid.
-- `softness` — Shepard power. UI [1, 8].
-- `lPreserve` / `cPreserve` — texel→identity blend in `FS_LUT_BUILD` (o1),
-  coherence-gated. 0=snap, 1=passthrough.
-- Envelope = dual-thumb floor/ceil **extension** per channel:
-  `lExtLo`/`lExtHi` (luma, [0,1]) + `cExtLo`/`cExtHi` (chroma, [0,1]
-  fraction × `LUT_AB_RANGE`). Each EXTENDS the per-hue curve bound
-  outward on its side; at max that side is a noop (= old toggle off).
-  No floor/ceil checkboxes anymore.
+Single dispatch, two outputs: `o0` = step1 core, `o1` = step2 (+preserve
++envelope). Two **barycentric L/C/H** anchor-distance metrics via `lchComp`
+(dL², dC², dH² — C/H from PROJECTION onto the anchor's hue axis, no atan →
+stable at grey):
+- `uWLuma` (WEIGHTING triangle) drives the LUMA blend; `uWHue` (DECOUPLING
+  triangle) drives the CHROMA/HUE blend. Pin separation = luma↔colour
+  decoupling (lean `wHue`→L for a luma-look-style L→hue coupling). Each
+  `[wL,wC,wH]` sums to 1, clamped ≥0.06 (tinted border in the triangle widget);
+  default centroid.
+- Pass 1: per-metric `dmin2L`/`dmin2H` + nearest-by-hue `nearAB`. Pass 2:
+  Shepard IDW on `d²/dmin²` per metric; chroma-preserving rescale (coherence).
+- `gate` = `hueGate` (rotate a confidently-opposing hue → nearest palette hue,
+  faded off near grey by a chroma-confidence ramp → no pinwheel) × `chromaGate`
+  (near-grey desat; **1 = relaxed/keep chroma**, 0 = full desat). Soft smoothsteps.
+- `o0` = IDW luma + `dir·target·gate` (no preserve/envelope). `o1` = +
+  `cPreserve`/`lPreserve` mix→identity + envelope clamp.
 
-### Step 1 (IDW) — `FS_LUT_BUILD`, per texel per L-slice
+`softness` = Shepard power, UI [1,8] (inverted: shown = 11−exp). `lPreserve` /
+`cPreserve` = texel→identity blend (o1, coherence-gated; 0=snap, 1=passthrough).
 
-Single dispatch, **MRT** two outputs (the IDW loop runs once):
-`o0` = step-1 core, `o1` = step-2 (preserve+envelope). The `gate`
-scalar (1e) is computed once and applied to both.
+### Envelope — `computeHueLCCurve` → `uHueLCCurve` (32-bin hue→Llo,Lhi,Clo,Chi)
 
-- 1a. Pass 1: per-metric min `d²` (`dmin2L` luma, `dmin2H` colour) +
-  nearest-by-hue `nearAB`. `d²` = `dot(lchComp(L,cab,s), w)` — barycentric
-  L/C/H over (dL², dC², dH²), C/H from projection onto the anchor's hue axis.
-- 1b. Pass 2: Shepard IDW on `d²/d_min²` per metric — luma uses `uWLuma`,
-  chroma/hue uses `uWHue`. No Gaussian hue gate (dropped). Accumulate Lab+Chroma.
-- 1c. Chroma-preserving rescale → `target`, coherence-modulated.
-- gate. Safety net `hueGate` (rotate opposing→nearest palette hue, fade by
-  chroma confidence) × `chromaGate` (near-grey desat).
-- **o0 / step 1** = `lab.x` (IDW luma), `yz = dir·target·gate`. No
-  preserve, no envelope.
-- **o1 / step 2** = 1d `cPreserve` mix→identity Chroma (`finalMag`),
-  `yz = dir·finalMag·gate`; 1f `lPreserve` mix→identity Luma; 1g
-  envelope clamp (`lExtLo/Hi`, `cExtLo/Hi`) w/ soft skirts.
+Per-hue palette L/C band, from ALL anchors. SMOOTH and contains every anchor:
+log-sum-exp soft band → ×12 circular blur along hue → **metaball** Gaussian
+re-inclusion bumps (each anchor adds a bump sized to its deficit so the band
+reaches it, staying smooth) → ceil≥floor guard (collapse to mean if inverted).
+Chroma ceil also keeps a hard local inclusion.
+Clamp (o1 1g): dual-thumb **extension** `lExtLo/Hi`, `cExtLo/Hi` EXTEND the band
+outward (1 = noop/relaxed, 0 = clamp at curve). Luma clamp = order-preserving
+COMPRESSION skirt (below-floor stays below floor — no overbrighten; input-L
+ordering preserved). Looked up by **output** hue (stable near grey). Re-asserted
+late (`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`).
 
-Captured intermediates feed the inline stage previews: `lutTexStep1`
-(o0), `lutTexStep2` (o1 snapshot, top of `applyLateStages`), and the
-final `lutTex` (step 3). The step-2 luma envelope (`lExtLo/Hi`) is RE-ASSERTED
-late (`applyLEnvelopePass`, `FS_LUT_L_ENVELOPE`) after luma-look — luma-look /
-blur can drift L back out of band. Same control, keyed on output hue; noop when
-`lExt=1`.
+### Late stages — `applyLateStages`
 
-### Shared late stages — `applyLateStages`
+Capture `lutTexStep2` (o1) → **monotonic-L pass on the step1 & step2 snapshots**
+(`makeColumnMonotonic`/`applyLumaOrderPass`) → anchor stamp → blur × `smoothness`
+(`FS_LUT_BLUR`: chroma-preserving + hue net, taper 1→0.3) → reach desat
+(`applyReachPass`) → luma-look (`applyLumaLookPass`: rotates `arg(yz)` toward the
+L→hue curve, reads `lutTexRaw`, re-runs alone on slider change) → final
+monotonic-L → soft closing stamp (`stampStrength`). Final blend = `lutStrength`.
+(Luma-look is largely modellable by `wHue`→L; still present.)
 
-2. Anchor stamp.
-3. Blur × `smoothness` iters (3 axes + restamp). `FS_LUT_BLUR`:
-   chroma-preserving rescale + hue safety net; no
-   `cPreserve`/`lPreserve` (build-stage only). `uBlurStrength` tapers
-   1.0→0.3 across iters.
-4. Final anchor stamp.
-5. Reach desaturation (`applyReachPass`) — Chroma falloff vs.
-   anchor distance.
-6. Luma-look (`applyLumaLookPass`) — rotates `arg(yz)` toward Luma→Hue
-   curve. Reads cached `state.lutTexRaw`; moving only `lumaLook`
-   reruns just this pass.
+### Previews / debug
+
+3 inline stage strips render the EXACT per-pixel shader vs `lutTexStep1/2`,
+`lutTex` (no CPU re-derivation). `step2cPreview` = a **chroma-ramp** source
+(hue×chroma at fixed L) through step2; also a `chroma` test-image button. LUT
+slice = a/b plane at `lutSliceL`. `lutStage` (1/2/3) drives the test image
+(def 2). Envelope overlays (`debugEnvVizL`/`C`): blue floor / red ceil curves
+(pale base + saturated effective) on the step2 (luma) and chroma previews — NOT
+the slice. Markers show all build seeds.
 
 ## Static checks — `scripts/check.mjs`
 
-Dep-free Node. Checks inline-`<script>` syntax, `images/<file>` refs,
-`data-preset` ↔ `PRESETS` keys, `bindImageBtn` wiring. Pre-commit hook
-runs + blocks on fail.
+Dep-free Node: inline-`<script>` syntax, `images/<file>` refs, `data-preset` ↔
+`PRESETS`, `bindImageBtn` wiring. Pre-commit runs + blocks on fail.
 
-## Headless runtime testing — Chrome + SwiftShader
+## Headless — Chrome + SwiftShader
 
-SwiftShader here exposes `EXT_color_buffer_float` → LUT pipeline runs
-end-to-end. Run GPU code yourself before declaring done.
+SwiftShader exposes `EXT_color_buffer_float` → full LUT pipeline runs. Run GPU
+code yourself before declaring done. Use a private `--user-data-dir` (else it
+attaches to a running Chrome); `Start-Process -Wait -RedirectStandardOutput` is
+reliable.
 
 ```powershell
-$chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
-& $chrome --headless=new --enable-unsafe-swiftshader `
-  --use-angle=swiftshader --no-sandbox `
-  --enable-logging=stderr --virtual-time-budget=10000 `
-  --dump-dom file:///C:/Projects/SoftPalette/index.html `
-  > $env:TEMP\dom.html 2> $env:TEMP\err.txt
-# read #lutStatus from dom.html; grep err.txt for shader-compile/Uncaught/TypeError.
+& $chrome --headless=new --enable-unsafe-swiftshader --use-angle=swiftshader `
+  --no-sandbox --user-data-dir=$env:TEMP\sp_prof --virtual-time-budget=12000 `
+  --dump-dom file:///C:/Projects/SoftPalette/index.html > dom.html 2> err.txt
 ```
 
-`#lutStatus` set by `updateLutStatus()`. Empty=init crashed. Clean:
-`built in <N>ms · neighbours ΔE avg ≈0.02 · anchor self ΔE max 0.000`.
-`anchor self ΔE > 0` = `stampAnchors` FBO regression. `GPU stall …
-ReadPixels` warnings benign.
-
-**A/B**: `Get-Content -Raw -replace` index.html → temp file w/ flipped
-`state.params` default, run, delete. ΔE within ~0.001 = paths agree.
-
-**Per-pixel/canvas shaders** invisible to `#lutStatus`. Use
-`--screenshot=path.png --window-size=W,H` or inject JS.
+`#lutStatus` (via `updateLutStatus`): clean ≈ `built in <N>ms · neighbours ΔE
+avg ≈0.02 · anchor self ΔE max ≈0.006`. Empty = init crash; grep err for
+`shader`/`Uncaught`/`TypeError`. Trailing `N/N off` = anchor count (32/32 with
+extend-palette on). **A/B**: full-window pixel diff of two temp copies with a
+flipped `state.params` default (sub-crops often hit only background). Per-pixel
+shaders are invisible to `#lutStatus` → `--screenshot`.
