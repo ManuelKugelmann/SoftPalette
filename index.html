@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-11T08:56:30Z">
+<meta name="build" content="2026-06-11T09:36:29Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -233,7 +233,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1>SoftPalette <span class="dim" style="margin-left:8px;font-weight:400">by Manuel Kugelmann · Bitcraft IT Consulting</span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" title="Click to copy. If this doesn't match the latest edit, hard-reload (Ctrl/Cmd+Shift+R)." id="buildBadge">2026-06-11T08:56:30Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-11T09:36:29Z</span>
   </div>
 </header>
 
@@ -244,24 +244,24 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>presets</h2>
     <div class="row tight">
-      <button data-preset="cold-warm" title="Cool teals/greens at low L, warm ambers/oranges at high L">cold/warm</button>
-      <button data-preset="moebiusGhibli" title="Merged moebius + ghibli — illustration earth tones, sky blues, navy, rust, sage">moebius/ghibli</button>
-      <button data-preset="office" title="MS-Office accent style: teal, yellow, berry, cherry red, navy, lime">office</button>
-      <button data-preset="nord" title="Nord — frost + aurora">nord</button>
-      <button data-preset="dracula" title="Dracula — vivid neon accents">dracula</button>
+      <button data-preset="cold-warm" title="Cool darks, warm lights">cold/warm</button>
+      <button data-preset="moebiusGhibli" title="Moebius + Ghibli illustration look">moebius/ghibli</button>
+      <button data-preset="office" title="Office-style accent colours">office</button>
+      <button data-preset="nord" title="Nord — cool frost + aurora">nord</button>
+      <button data-preset="dracula" title="Dracula — neon highlights">dracula</button>
     </div>
     <!-- Quake palettes on their own full-width row (equal-width = one line) -->
     <div class="row tight full">
-      <button data-preset="Quake256" title="Full canonical 256-entry Quake 1 palette (gfx/palette.lmp)">Quake256</button>
-      <button data-preset="Quake32"  title="32 representative entries — one max-chroma anchor per Quake hue bin + greys + skin/tan/peach/white">Quake32</button>
-      <button data-preset="Quake16"  title="16 entries — Quake32 with near-duplicate hues collapsed">Quake16</button>
+      <button data-preset="Quake256" title="Quake 1 — full 256-colour palette">Quake256</button>
+      <button data-preset="Quake32"  title="Quake 1 — 32 picked colours">Quake32</button>
+      <button data-preset="Quake16"  title="Quake 1 — 16 picked colours">Quake16</button>
     </div>
     <!-- Retro hardware palettes -->
     <div class="row tight">
-      <button data-preset="NES" title="Canonical NES (2C02) hardware palette — ~54 colors. SNES had no fixed palette (15-bit RGB)">(S)NES</button>
-      <button data-preset="EGA" title="IBM EGA / CGA default 16-colour palette">EGA</button>
-      <button data-preset="CGA" title="IBM CGA mode-4 palette 1 (high): black, cyan, magenta, white">CGA</button>
-      <button data-preset="phosphor" title="Early-PC monochrome phosphors: amber/orange, green, paper-white (on black)">phosphor</button>
+      <button data-preset="NES" title="NES hardware palette (~54 colours)">(S)NES</button>
+      <button data-preset="EGA" title="EGA / CGA 16-colour palette">EGA</button>
+      <button data-preset="CGA" title="CGA: black, cyan, magenta, white">CGA</button>
+      <button data-preset="phosphor" title="Old mono monitor tints + black">phosphor</button>
     </div>
   </section>
 
@@ -269,8 +269,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
     <h2>palette <span class="badge"><span id="paletteCount">0</span>/256</span></h2>
     <div class="swatches" id="swatches"></div>
     <div class="row tight">
-      <button id="addColor" title="Append a mid-grey anchor">+ add</button>
-      <button id="addBW" title="Append #000000 and #ffffff (skips duplicates)">+ b/w</button>
+      <button id="addColor" title="Append a mid-grey colour">+ add</button>
+      <button id="addBW" title="Append black + white">+ b/w</button>
       <button id="clearPalette">clear</button>
     </div>
   </section>
@@ -301,24 +301,24 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <!-- CENTER -->
 <section class="center">
   <div id="imageTabs" class="tabs">
-    <button id="hueImage"        class="tab tab-synth" title="Synthetic: Hue × Lightness gradient — Ok-HPLuv-boost with per-hue peaks in the upper third">hues</button>
-    <button id="resetImage"      class="tab tab-synth" title="Synthetic: sunset landscape">sunset</button>
-    <button id="landscapeImage"  class="tab tab-synth" title="Synthetic: landscape — atmospheric depth, greens">landscape</button>
-    <button id="portraitImage"   class="tab" title="Real photo: modern portrait — Gonzalo Bazgan (Wikimedia, CC-BY) — man, soft colourful backdrop">portrait M</button>
-    <button id="candidImage"     class="tab" title="Real photo: modern portrait — R. Sharma, Jaipur (Wikimedia, CC-BY) — person of colour, warm tones">portrait F</button>
-    <button id="classicImage"    class="tab" title="Classic test portrait: Kodak kodim04 (rights-clean Lenna alternative) — studio skin tones, red hat">classic</button>
-    <button id="crowdImage"      class="tab" title="Real photo: Kumbh Mela crowd, Prayagraj (Wikimedia) — dense crowd, varied skin tones + vivid clothing">crowd</button>
-    <button id="natureImage"     class="tab" title="Real photo: Kodak kodim13 (alpine stream, foliage, sky)">nature</button>
-    <button id="lakeImage"       class="tab" title="Real photo: Llao Llao, Argentina (Wikimedia) — turquoise lake, forest, mountains">lake</button>
-    <button id="parrotsImage"    class="tab" title="Real photo: Kodak kodim23 (vivid macaws — high saturation, full hue circle)">parrots</button>
-    <button id="colorfulImage"   class="tab" title="Real photo: Lathmar Holi 2022, Nandgaon — color-powder crowd, full hue circle (Wikimedia)">colorful</button>
-    <button id="starryNight"     class="tab" title="Painting: Van Gogh — The Starry Night (public domain)">starry night</button>
-    <button id="waveImage"       class="tab" title="Painting: Hokusai — The Great Wave off Kanagawa (public domain) — Prussian blues, woodblock">the wave</button>
-    <button id="monaLisaImage"   class="tab" title="Painting: Leonardo — Mona Lisa (public domain) — muted earth tones, sfumato">mona lisa</button>
-    <button id="mangaImage"      class="tab" title="Anime: Wikipe-tan — Wikipedia's mascot (CC-BY-SA) — flat anime shading, blue/navy/white">manga</button>
-    <button id="strategyImage"   class="tab" title="Video game screenshot: 0 A.D. real-time strategy (saturated, stylized)">strategy</button>
-    <button id="shooterImage"    class="tab" title="Video game screenshot: Xonotic FPS (CC) — sci-fi blues, orange explosion">shooter</button>
-    <button id="loadFile"        class="tab tab-file" title="Click to browse, or drop / paste an image onto the canvas">file…</button>
+    <button id="hueImage"        class="tab tab-synth" title="Test image: hue & brightness sweep">hues</button>
+    <button id="resetImage"      class="tab tab-synth" title="Test image: sunset landscape">sunset</button>
+    <button id="landscapeImage"  class="tab tab-synth" title="Test image: landscape scene">landscape</button>
+    <button id="portraitImage"   class="tab" title="Portrait — man (Wikimedia)">portrait M</button>
+    <button id="candidImage"     class="tab" title="Portrait — woman (Wikimedia)">portrait F</button>
+    <button id="classicImage"    class="tab" title="Studio portrait — woman, red hat">classic</button>
+    <button id="crowdImage"      class="tab" title="Crowd at Kumbh Mela (India)">crowd</button>
+    <button id="natureImage"     class="tab" title="Alpine stream + foliage">nature</button>
+    <button id="lakeImage"       class="tab" title="Mountain lake + forest">lake</button>
+    <button id="parrotsImage"    class="tab" title="Vivid macaws — wide colour range">parrots</button>
+    <button id="colorfulImage"   class="tab" title="Holi colour-powder crowd">colorful</button>
+    <button id="starryNight"     class="tab" title="Van Gogh — The Starry Night">starry night</button>
+    <button id="waveImage"       class="tab" title="Hokusai — The Great Wave">the wave</button>
+    <button id="monaLisaImage"   class="tab" title="Leonardo — Mona Lisa">mona lisa</button>
+    <button id="mangaImage"      class="tab" title="Wikipe-tan — flat anime style">manga</button>
+    <button id="strategyImage"   class="tab" title="0 A.D. — strategy game">strategy</button>
+    <button id="shooterImage"    class="tab" title="Xonotic — first-person shooter">shooter</button>
+    <button id="loadFile"        class="tab tab-file" title="Browse, drop or paste an image">file…</button>
   </div>
   <div id="canvasWrap" class="empty">
     <canvas id="canvas"></canvas>
@@ -337,16 +337,16 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
   <section class="card">
     <h2>lut parameters</h2>
     <div class="row full compact" style="margin-bottom:8px;display:flex;gap:4px">
-      <button id="savePreset"  style="flex:1" title="Save current params as a JSON preset file">save</button>
-      <button id="loadPreset"  style="flex:1" title="Load a JSON preset from a file">load</button>
-      <button id="copyPreset"  style="flex:1" title="Copy current params to clipboard as JSON">copy</button>
-      <button id="pastePreset" style="flex:1" title="Paste a JSON preset from clipboard">paste</button>
+      <button id="savePreset"  style="flex:1" title="Save settings to file">save</button>
+      <button id="loadPreset"  style="flex:1" title="Load settings from file">load</button>
+      <button id="copyPreset"  style="flex:1" title="Copy settings to clipboard">copy</button>
+      <button id="pastePreset" style="flex:1" title="Paste settings from clipboard">paste</button>
     </div>
     <input type="file" id="loadPresetFile" accept="application/json,.json" style="display:none">
     <div class="row full compact" style="margin-bottom:8px;display:flex;flex-wrap:nowrap;gap:4px">
-      <button data-lutpreset="soft"      style="flex:1" title="Soft blend (low softness exponent)">soft</button>
-      <button data-lutpreset="balanced"  style="flex:1" title="Middle softness">balanced</button>
-      <button data-lutpreset="hard"      style="flex:1" title="Near-Voronoi snap (high softness exponent)">hard</button>
+      <button data-lutpreset="soft"      style="flex:1" title="Soft blend between colours">soft</button>
+      <button data-lutpreset="balanced"  style="flex:1" title="Balanced blend">balanced</button>
+      <button data-lutpreset="hard"      style="flex:1" title="Sharp colour edges">hard</button>
     </div>
 
     <!-- GLOBAL: LUT size + hue gate. NOT step-scoped: hue gate gates
@@ -359,36 +359,32 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       </div>
       <div class="slider" style="margin-top:6px">
         <div class="lbl"><span>hue gate</span><span class="v" id="vHueGate">0.50</span></div>
-        <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Opposing-hue safety net (build + blur). 0 = kill any hue 90°+ off the cell's identity; 1 = only the exact opposite.">
+        <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Block wrong-hue bleed">
       </div>
-      <div class="slider" style="margin-top:6px" title="Fade near-grey texels toward grey (build + blur safety net). 1 = full desat; 0 = keep their chroma (no white/black grey-axis wash).">
-        <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">1.00</span></div>
-        <input type="range" id="chromaGate" min="0" max="1" step="0.01" value="1.0">
+      <div class="slider" style="margin-top:6px" title="Near-grey desat safety net. 1 = max relaxation (keep chroma); 0 = full desat (keep greys grey).">
+        <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">0.50</span></div>
+        <input type="range" id="chromaGate" min="0" max="1" step="0.01" value="0.5">
       </div>
     </div>
     <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
 
-    <!-- Build-stage params (IDW). lRange/abRange = anisotropic anchor-distance
-         weights; hRange = Gaussian hue-gate σ; softness = Shepard power. -->
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>anchor luma range</span><span class="v" id="vLRange">0.50</span></div>
-      <input type="range" id="lRange" min="0.25" max="1" step="0.01" value="0.50">
+    <!-- Build-stage params (IDW). Two barycentric L/C/H anchor-distance metrics:
+         WEIGHTING (luma blend) + DECOUPLING (chroma/hue blend). Drag the pin
+         toward a vertex to weight that axis (C/H from projection onto the
+         anchor's hue axis — stable at grey). softness = Shepard power. -->
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <div style="flex:1;text-align:center">
+        <div class="note" style="color:var(--txd)">luma blend</div>
+        <canvas id="triLuma" width="124" height="112" title="Brightness blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
+      </div>
+      <div style="flex:1;text-align:center">
+        <div class="note" style="color:var(--txd)">hue blend</div>
+        <canvas id="triHue" width="124" height="112" title="Colour blend mix" style="width:100%;height:auto;cursor:crosshair;border:1px solid var(--bd)"></canvas>
+      </div>
     </div>
     <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>anchor chroma range</span><span class="v" id="vAbRange">0.50</span></div>
-      <input type="range" id="abRange" min="0.25" max="1" step="0.01" value="0.50">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>anchor hue range</span><span class="v" id="vHRange">0.50</span></div>
-      <input type="range" id="hRange" min="0.25" max="1" step="0.01" value="0.50">
-    </div>
-    <div class="slider" style="margin-top:6px" title="How much the hue/chroma blend follows luma (luma always uses full L). Low = hue borrowed across all L — keeps colour at extreme L, decouples hue from the luma steps; high = hue tied to luma.">
-      <div class="lbl"><span>hue luma balance</span><span class="v" id="vHueLWeight">0.35</span></div>
-      <input type="range" id="hueLWeight" min="0" max="1" step="0.01" value="0.35">
-    </div>
-    <div class="slider" style="margin-top:6px">
-      <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">7.0</span></div>
-      <input type="range" id="softness" min="1" max="8" step="0.1" value="7.0">
+      <div class="lbl"><span>anchor softness</span><span class="v" id="vSoftness">5.0</span></div>
+      <input type="range" id="softness" min="1" max="8" step="0.1" value="5.0">
     </div>
 
     <!-- step 1 preview — IDW core (lutTexStep1), before preserve+envelope. -->
@@ -441,7 +437,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <div class="lbl"><span>luma look</span><span class="v" id="vLumaLook">0.00</span></div>
       <input type="range" id="lumaLook" min="0" max="1" step="0.01" value="0.0">
     </div>
-    <div class="slider" style="margin-top:6px" title="Closing anchor stamp (step 3, runs last): 1 = exact palette color (faithful), 0 = blended into the surround (smooth).">
+    <div class="slider" style="margin-top:6px" title="Keep palette colours pure at end">
       <div class="lbl"><span>anchor stamp · faithful↔smooth</span><span class="v" id="vStampStrength">0.70</span></div>
       <input type="range" id="stampStrength" min="0" max="1" step="0.01" value="0.7">
     </div>
@@ -459,14 +455,14 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
          isolate the others' contribution to an artifact. -->
     <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)">
       <div style="display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:var(--txd)">
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Luma envelope floor/ceil as black/white lines on the hue previews."><input type="checkbox" id="debugEnvVizL" checked style="margin:0">L env viz</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Chroma envelope floor/ceil as red/blue rings on the LUT slice."><input type="checkbox" id="debugEnvVizC" checked style="margin:0">C env viz</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Show brightness limits"><input type="checkbox" id="debugEnvVizL" checked style="margin:0">L env viz</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Show saturation limits"><input type="checkbox" id="debugEnvVizC" checked style="margin:0">C env viz</label>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--txd)" title="Apply the LUT captured at this pipeline stage to the test image.">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--txd)" title="Pick processing step to preview">
         LUT
         <select id="lutStage" style="flex:1;background:var(--bg3);color:var(--tx);border:1px solid var(--bd);font:inherit;font-size:11px;padding:2px 4px">
-          <option value="1" selected>step 1 — idw core</option>
-          <option value="2">step 2 — + preserve/envelope</option>
+          <option value="1">step 1 — idw core</option>
+          <option value="2" selected>step 2 — + preserve/envelope</option>
           <option value="3">step 3 — final pipeline</option>
         </select>
       </label>
@@ -531,7 +527,7 @@ const PRESETS = {
   'office':      ['#1abc9c','#f1c40f','#c2185b','#d2042d','#1a237e','#2ecc71'],
   // Nord — frost (cool blues) + aurora (warm accents)
   'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
-  // Dracula — vivid neon accents
+  // Dracula — neon highlights
   'dracula':     ['#ff79c6','#bd93f9','#8be9fd','#50fa7b','#f1fa8c','#ffb86c','#ff5555','#6272a4'],
   // Canonical NES (2C02) hardware palette — the ~54 distinct colors of the
   // 64-slot table, with the repeated pure-blacks collapsed to one. The SNES
@@ -546,7 +542,7 @@ const PRESETS = {
     '#fcfcfc','#a4e4fc','#b8b8f8','#d8b8f8','#f8b8f8','#f8a4c0','#f0d0b0','#fce0a8',
     '#f8d878','#d8f878','#b8f8b8','#b8f8d8','#00fcfc','#f8d8f8',
   ],
-  // IBM EGA / CGA default 16-colour palette (CGA's brown at index 6 instead
+  // EGA / CGA 16-colour palette (CGA's brown at index 6 instead
   // of dark yellow). EGA could remap from 64 colours; this is the boot default.
   'EGA':         [
     '#000000','#0000aa','#00aa00','#00aaaa','#aa0000','#aa00aa','#aa5500','#aaaaaa',
@@ -636,23 +632,24 @@ const state = {
     // LUT cube edge length (odd, in LUT_SIZES). Default 33³ — production-standard.
     lutSize: 33,
 
-    // Build params (IDW): anisotropic distance metric + Gaussian Hue gate +
-    // Shepard power.
-    lRange: 0.5,           // anchor luma range — σL in distance metric. UI [0.25, 1].
-    abRange: 0.5,          // anchor chroma range — σab on (a, b) axes. UI [0.25, 1].
-    hRange: 0.5,           // anchor hue range — Gaussian gate σ (rad). UI [0.25, 1].
-    softness: 4,           // IDW power exponent; 1 = linear, 10 = hard nearest.
-    hueLWeight: 0.35,      // L weight in the HUE/chroma blend metric (luma uses
-                           // full L). Low = hue borrowed across all L (colour kept
-                           // at extreme L); high = hue tied to L like luma. UI [0,1].
+    // Build params (IDW): two barycentric L/C/H anchor-distance metrics +
+    // Gaussian Hue gate + Shepard power. (C/H via projection onto the anchor's
+    // hue axis — stable at grey, no atan.)
+    // wLuma = WEIGHTING triangle (luma blend); wHue = DECOUPLING triangle
+    // (chroma/hue blend). Each [wL, wC, wH], summing to 1. Default both at the
+    // centroid (equal L/C/H) — neutral; drag toward a vertex to bias, and pull
+    // the two pins apart to decouple luma from colour.
+    wLuma: [1/3, 1/3, 1/3],
+    wHue:  [1/3, 1/3, 1/3],
+    softness: 6,           // IDW power exponent (UI shows 11−exp = 5, "balanced").
     // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
     hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
                            // texel's identity Hue. 0 = full gate (anti-aligned
                            // → grey), 1 = no gate. Applied in FS_LUT_BUILD (step
                            // 1) AND FS_LUT_BLUR (step 3) after the chroma rescale.
-    chromaGate: 1.0,      // GLOBAL safety-net STRENGTH: fade near-grey texels
-                           // toward grey (FS_LUT_BUILD + FS_LUT_BLUR). 1 = full
-                           // desat; 0 = keep their chroma (no white/black wash).
+    chromaGate: 0.5,      // GLOBAL safety net: fade near-grey texels toward grey
+                           // (FS_LUT_BUILD + FS_LUT_BLUR). 1 = max relaxation
+                           // (keep chroma, no white/black wash); 0 = full desat.
 
     // Texel→identity-LUT blend (applied inside FS_LUT_BUILD with anchor
     // coherence gate; 0 = full LUT effect, 1 = passthrough identity).
@@ -696,8 +693,7 @@ const state = {
     // stay strong through the blur and blend into the surround at the end.
     stampStrength:    0.7,
     // Debug: which pipeline-stage LUT drives the test image (1/2/3). 3 = final.
-    // Temporarily 1 while debugging step 1.
-    lutStage:         1,
+    lutStage:         2,
 
     // Auto-extend: three sequential passes — hue gaps, then chroma steps,
     // then L steps. extendH is a gap threshold (rad); extendC / extendL are
@@ -1935,13 +1931,11 @@ function recomputeLut(){
   gl.uniform1i(gl.getUniformLocation(prog, 'uSeeds'), 0);
   gl.uniform1i(gl.getUniformLocation(prog, 'uPalN'), palN);
   gl.uniform1f(gl.getUniformLocation(prog, 'uN'), N);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaL'),  state.params.lRange);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uSigmaAB'), state.params.abRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uSoftness'), state.params.softness);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uHueLWeight'), state.params.hueLWeight);
+  gl.uniform3f(gl.getUniformLocation(prog, 'uWLuma'), state.params.wLuma[0], state.params.wLuma[1], state.params.wLuma[2]);
+  gl.uniform3f(gl.getUniformLocation(prog, 'uWHue'),  state.params.wHue[0],  state.params.wHue[1],  state.params.wHue[2]);
   gl.uniform1f(gl.getUniformLocation(prog, 'uLPreserve'),  state.params.lPreserve);
   gl.uniform1f(gl.getUniformLocation(prog, 'uCPreserve'),  state.params.cPreserve);
-  gl.uniform1f(gl.getUniformLocation(prog, 'uHRange'),  state.params.hRange);
   gl.uniform1f(gl.getUniformLocation(prog, 'uHueGate'), state.params.hueGate);
   gl.uniform1f(gl.getUniformLocation(prog, 'uChromaGate'), state.params.chromaGate);
   // Envelope floor/ceil extensions (dual slider). Value = relaxedness = the
@@ -2201,15 +2195,15 @@ uniform sampler2D uSeeds;     // MAX_PAL × 1, rgb=Lab, a=strength
 uniform int   uPalN;
 uniform float uN;             // LUT cube edge length
 uniform float uZ;             // current L-slice index in [0, N-1]
-uniform float uSigmaL;        // anisotropic L axis
-uniform float uSigmaAB;       // anisotropic A/B axes
 uniform float uSoftness;      // IDW power exponent
-uniform float uHueLWeight;    // L weight in the HUE/chroma blend metric. Low = hue
-                              // borrowed across all L (keeps colour at extreme L);
-                              // high = hue tied to L like luma. (Luma always full L.)
+// Barycentric L/C/H weights (each sums to 1) for the two anchor-distance metrics.
+// WEIGHTING triangle drives the LUMA blend; DECOUPLING triangle drives the
+// chroma/hue blend. When the two coincide, luma & colour are coupled; their
+// separation is the "borrow luma / keep colour" decoupling.
+uniform vec3  uWLuma;         // (wL, wC, wH) for the luma blend metric
+uniform vec3  uWHue;          // (wL, wC, wH) for the chroma/hue blend metric
 uniform float uLPreserve;        // 0 = snap L to anchor, 1 = passthrough cell L
 uniform float uCPreserve;        // 0 = snap chroma to anchor, 1 = passthrough cell C
-uniform float uHRange;        // shared anchor hue range — Gaussian gate scale (rad)
 uniform float uHueGate;       // Hue-fidelity safety net: value at 90° AND
                               // (derived) cosine of the kill-cone edge =
                               // -uHueGate. 0 → kills 90°+; 1 → only 180°
@@ -2234,6 +2228,28 @@ uniform sampler2D uHueLCCurve;// 32×1 RGBA32F: rgba = (L_lo, L_hi, C_lo, C_hi) 
 float softMax(float x, float m, float k){ return 0.5 * (x + m + sqrt((x - m) * (x - m) + k * k)); }
 float softMin(float x, float m, float k){ return 0.5 * (x + m - sqrt((x - m) * (x - m) + k * k)); }
 
+// L/C/H squared-distance components from cell (L, cab) to anchor s, each
+// normalized so the three axes are comparable before the barycentric L/C/H
+// weighting. Chroma/Hue come from PROJECTING onto the ANCHOR's hue axis (which
+// is fixed & well-defined), NOT the cell's hue angle — so there is no atan and
+// it stays stable at the grey axis (chroma → radial, hue → 0).
+vec3 lchComp(float L, vec2 cab, vec4 s, float abR){
+  float inv = 1.0 / max(abR, 1e-4);
+  float dL  = L - s.x;
+  float Cs  = length(s.yz);
+  float dC, dH;
+  if (Cs > 1e-4){
+    vec2  u    = s.yz / Cs;           // anchor hue axis (unit, stable)
+    float proj = dot(cab, u);
+    dC = proj - Cs;                   // chroma deviation along the hue ray
+    dH = length(cab - proj * u);      // off-hue (perpendicular) deviation
+  } else {
+    dC = length(cab);                 // grey anchor: all radial, no hue ray
+    dH = 0.0;
+  }
+  return vec3(dL * dL, dC * dC * inv * inv, dH * dH * inv * inv);
+}
+
 void main(){
   float N    = uN;
   float ai   = floor(gl_FragCoord.x);
@@ -2243,47 +2259,28 @@ void main(){
   float a = -uAbRange + (ai / (N - 1.0)) * (2.0 * uAbRange);
   float b = -uAbRange + (bi / (N - 1.0)) * (2.0 * uAbRange);
 
-  float invSL2 = 1.0 / (uSigmaL  * uSigmaL);
-  float invSA2 = 1.0 / (uSigmaAB * uSigmaAB);
-  float halfP  = uSoftness * 0.5;
+  vec2  cab   = vec2(a, b);
+  float halfP = uSoftness * 0.5;
 
-  // Pass 1: minimum anisotropic d² (for IDW scaling), minimum isotropic d²
-  // (for rejection envelope), and TRACK the nearest anchor's L and C (for
-  // the per-channel envelope clamp later).
-  float dmin2     = 1e30;
-  float dmin2_iso = 1e30;
-  float nearestL  = 0.5;
-  float nearestC  = 0.0;
-  vec2  nearAB    = vec2(0.0);   // nearest anchor's (a,b) — a real palette hue
+  // Pass 1: minimum WEIGHTED d² for each metric (Shepard ratio scaling), and the
+  // nearest-by-hue anchor's (a,b) for the safety-net hue rotation. Two metrics:
+  // luma blend uses the WEIGHTING triangle, hue/chroma uses the DECOUPLING one.
+  float dmin2L = 1e30;
+  float dmin2H = 1e30;
+  vec2  nearAB = vec2(0.0);   // nearest-by-hue anchor's (a,b) — a real palette hue
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
-    float dL = (L - s.x);
-    float dA = (a - s.y);
-    float dB = (b - s.z);
-    float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    if (d2 < dmin2){
-      dmin2    = d2;
-      nearestL = s.x;
-      nearestC = length(s.yz);
-      nearAB   = s.yz;
-    }
-    dmin2_iso = min(dmin2_iso, dL*dL + dA*dA + dB*dB);
+    vec3 c = lchComp(L, cab, s, uAbRange);
+    dmin2L = min(dmin2L, dot(c, uWLuma));
+    float dH2 = dot(c, uWHue);
+    if (dH2 < dmin2H){ dmin2H = dH2; nearAB = s.yz; }
   }
 
-  // Pass 2: Shepard IDW on RATIO d² / d_min², plus weighted chroma. Hue
-  // hemisphere gate uses the cell's own (a, b) direction so we don't bring
-  // in opposite-hue anchors with non-trivial weight (which would otherwise
-  // pull the result toward grey or a confidently-wrong hue). Luma look is
-  // applied later as a late-stage cell rotation, so it does NOT influence
-  // anchor weighting here.
-  // Luma uses w WITHOUT the hue gate, chroma uses w WITH the hue gate.
-  // Decoupling fixes the fern-like L-direction artifact at narrow hRange:
-  // with a tight gate, grey (low-C) anchors are NOT gated while chromatic
-  // anchors are heavily gated, so greys dominate the weighted sum and drag
-  // Luma toward grey-anchor L values, producing visible plateaus along L.
-  vec2 gateDir = vec2(a, b);
-  float gateC2 = gateDir.x*gateDir.x + gateDir.y*gateDir.y;
+  // Pass 2: Shepard IDW on the d²/d_min² RATIO, per metric. Luma weight uses the
+  // WEIGHTING triangle; chroma/hue weight uses the DECOUPLING triangle. The
+  // hue-blend H weight (+ the global hueGate net) handles hue tightness — the
+  // old Gaussian hue gate (hRange) was redundant and is dropped.
   float sumW_l = 1e-12;
   float sumL   = 0.0;
   float sumW   = 1e-12;
@@ -2292,27 +2289,9 @@ void main(){
   for (int i = 0; i < ${MAX_PAL}; i++){
     if (i >= uPalN) break;
     vec4 s = texelFetch(uSeeds, ivec2(i, 0), 0);
-    float dL = (L - s.x);
-    float dA = (a - s.y);
-    float dB = (b - s.z);
-    float d2 = dL*dL*invSL2 + dA*dA*invSA2 + dB*dB*invSA2;
-    float r2 = (d2 + 1e-6) / (dmin2 + 1e-6);
-    float w_l = pow(r2, -halfP) * s.w;
-    // Chroma weight penalises Luma distance LESS (×uHueLWeight, default 0.35)
-    // than the luma weight, so a dark/bright cell still picks up its HUE'S chroma
-    // from anchors at other L — colours are kept at extreme L instead of fading
-    // to grey. The L itself still comes from the (full-L) ungated luma weight,
-    // and black/white anchors still pull the extremes via luma + envelope floor.
-    float d2c = dL*dL*invSL2*uHueLWeight + dA*dA*invSA2 + dB*dB*invSA2;
-    float w   = pow((d2c + 1e-6) / (dmin2 + 1e-6), -halfP) * s.w;
-    float ancC2 = s.y*s.y + s.z*s.z;
-    if (gateC2 > 1e-6 && ancC2 > 1e-6){
-      float cos_dh = (gateDir.x*s.y + gateDir.y*s.z) / sqrt(gateC2 * ancC2);
-      float dh    = acos(clamp(cos_dh, -1.0, 1.0));
-      // Gaussian hue gate scaled by uHRange. dh=0 → full weight,
-      // dh=uHRange → ≈0.61, dh=2·uHRange → ≈0.14.
-      w *= exp(-dh * dh / (2.0 * uHRange * uHRange));
-    }
+    vec3 c = lchComp(L, cab, s, uAbRange);
+    float w_l = pow((dot(c, uWLuma) + 1e-6) / (dmin2L + 1e-6), -halfP) * s.w;
+    float w   = pow((dot(c, uWHue)  + 1e-6) / (dmin2H + 1e-6), -halfP) * s.w;
     sumW_l += w_l;
     sumL   += w_l * s.x;
     sumW   += w;
@@ -2346,7 +2325,12 @@ void main(){
       float cosFull = mix(-0.3, -0.97, uHueGate);
       hueGateMult   = smoothstep(-1.0, cosFull, cosOut);
     }
-    float shift = 1.0 - hueGateMult;   // 0 = aligned, 1 = fully opposing
+    // Fade the gate off where the cell has little chroma: its hue is unreliable
+    // (atan singularity at the grey axis), so gating there flips cell-to-cell =
+    // pinwheel feathering. conf ramps 0→1 with chroma so the gate engages only
+    // where the cell's hue is meaningful.
+    float conf  = smoothstep(0.01, 0.05, sqrt(cellC2));
+    float shift = (1.0 - hueGateMult) * conf;   // 0 = aligned/low-chroma, 1 = opposing
     if (shift > 1e-3 && magAB > 1e-6 && dot(nearAB, nearAB) > 1e-8){
       // Rotate the output hue toward the nearest palette anchor's hue.
       float aCur = atan(dir.y, dir.x);
@@ -2359,9 +2343,9 @@ void main(){
     }
     // Opposing cells keep luma but fade to a low palette-tinted chroma.
     float opposeChroma = mix(1.0, 0.3, shift);
-    // chromaGate: fade near-grey texels (no reliable hue) toward grey. Strength
-    // 1 = full desat; 0 = keep chroma (no greying/whitening near the grey axis).
-    float ct = mix(1.0, smoothstep(0.002, 0.025, sqrt(cellC2)), uChromaGate);
+    // chromaGate: fade near-grey texels (no reliable hue) toward grey.
+    // 1 = max relaxation (keep chroma); 0 = full desat near the grey axis.
+    float ct = mix(smoothstep(0.002, 0.025, sqrt(cellC2)), 1.0, uChromaGate);
     gate = ct * opposeChroma;
   }
 
@@ -2513,7 +2497,11 @@ void main(){
     float cosFull = mix(-0.3, -0.97, uHueGate);
     hueGateMult   = smoothstep(-1.0, cosFull, cosOut);
   }
-  float chromaGate = mix(1.0, smoothstep(0.002, 0.025, sqrt(cellC2)), uChromaGate);
+  // Fade the gate off near the grey axis (unreliable cell hue → atan
+  // singularity → pinwheel feathering); engage only where chroma is meaningful.
+  float hgConf = smoothstep(0.01, 0.05, sqrt(cellC2));
+  hueGateMult  = mix(1.0, hueGateMult, hgConf);
+  float chromaGate = mix(smoothstep(0.002, 0.025, sqrt(cellC2)), 1.0, uChromaGate);
   // No lumaTrust fade — keep chroma at the L extremes (no grey-out near ceil/floor).
   v.gb *= hueGateMult * chromaGate;
   // Final taper: mix between the (chroma-preserved, safety-netted) blur output
@@ -3953,9 +3941,69 @@ function init(){
   }
   // Global hue-gate safety net (top section) — used in build + blur.
   bindLutSlider('hueGate',    'vHueGate',    'hueGate',    v => v.toFixed(2));
-  bindLutSlider('lRange',     'vLRange',     'lRange',     v => v.toFixed(2));
-  bindLutSlider('abRange',    'vAbRange',    'abRange',    v => v.toFixed(2));
-  bindLutSlider('hueLWeight', 'vHueLWeight', 'hueLWeight', v => v.toFixed(2));
+
+  // Barycentric L/C/H anchor-distance triangles (replace luma/chroma range +
+  // hue-luma-balance sliders). state.params[key] = [wL, wC, wH] summing to 1.
+  // Drag the pin; barycentric of the cursor inside the L(top)/C(BL)/H(BR) triangle.
+  const triRedraws = [];
+  function bindBaryTriangle(canvasId, key){
+    const cv = document.getElementById(canvasId);
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height, pad = 16;
+    const VL = [W / 2, pad], VA = [pad, H - pad], VB = [W - pad, H - pad];
+    const det = (VA[1] - VB[1]) * (VL[0] - VB[0]) + (VB[0] - VA[0]) * (VL[1] - VB[1]);
+    // No coordinate may hit 0 (a zeroed axis = degenerate metric). Confine the
+    // pin to an inner triangle: w_i = MIN + (1-3·MIN)·raw_i ⇒ every w_i ≥ MIN,
+    // sum = 1. The band between outer & inner edges is the clamped-out border.
+    const MIN = 0.06, K = 1 - 3 * MIN;
+    const cen = [(VL[0]+VA[0]+VB[0])/3, (VL[1]+VA[1]+VB[1])/3];
+    const shrink = V => [cen[0] + K*(V[0]-cen[0]), cen[1] + K*(V[1]-cen[1])];
+    const IL = shrink(VL), IA = shrink(VA), IB = shrink(VB);   // inner (feasible) triangle
+    function toBary(px, py){
+      let wl = ((VA[1] - VB[1]) * (px - VB[0]) + (VB[0] - VA[0]) * (py - VB[1])) / det;
+      let wa = ((VB[1] - VL[1]) * (px - VB[0]) + (VL[0] - VB[0]) * (py - VB[1])) / det;
+      let wb = 1 - wl - wa;
+      wl = Math.max(0, wl); wa = Math.max(0, wa); wb = Math.max(0, wb);
+      const s = wl + wa + wb || 1;
+      return [MIN + K*(wl/s), MIN + K*(wa/s), MIN + K*(wb/s)];
+    }
+    function pin(w){ return [w[0]*VL[0] + w[1]*VA[0] + w[2]*VB[0], w[0]*VL[1] + w[1]*VA[1] + w[2]*VB[1]]; }
+    function draw(){
+      ctx.clearRect(0, 0, W, H);
+      // Tinted forbidden border = outer triangle minus inner (even-odd fill).
+      ctx.beginPath();
+      ctx.moveTo(VL[0],VL[1]); ctx.lineTo(VA[0],VA[1]); ctx.lineTo(VB[0],VB[1]); ctx.closePath();
+      ctx.moveTo(IL[0],IL[1]); ctx.lineTo(IB[0],IB[1]); ctx.lineTo(IA[0],IA[1]); ctx.closePath();
+      ctx.fillStyle = 'rgba(180,180,180,0.16)'; ctx.fill('evenodd');
+      // Outer + inner outlines.
+      ctx.beginPath(); ctx.moveTo(VL[0],VL[1]); ctx.lineTo(VA[0],VA[1]); ctx.lineTo(VB[0],VB[1]); ctx.closePath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(IL[0],IL[1]); ctx.lineTo(IA[0],IA[1]); ctx.lineTo(IB[0],IB[1]); ctx.closePath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '9px monospace';
+      ctx.textAlign = 'center'; ctx.fillText('L', VL[0], VL[1] - 4);
+      ctx.fillText('C', VA[0], VA[1] + 10); ctx.fillText('H', VB[0], VB[1] + 10);
+      const p = pin(state.params[key] || [1/3,1/3,1/3]);
+      ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(120,230,170,0.95)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+    let dragging = false;
+    function setFrom(e){
+      const r = cv.getBoundingClientRect();
+      const px = (e.clientX - r.left) * (W / r.width), py = (e.clientY - r.top) * (H / r.height);
+      state.params[key] = toBary(px, py);
+      draw(); clearActivePreset(); scheduleLutRebuild();
+    }
+    cv.addEventListener('pointerdown', e => { dragging = true; cv.setPointerCapture(e.pointerId); setFrom(e); });
+    cv.addEventListener('pointermove', e => { if (dragging) setFrom(e); });
+    cv.addEventListener('pointerup',   () => { dragging = false; });
+    triRedraws.push(draw);
+    draw();
+  }
+  bindBaryTriangle('triLuma', 'wLuma');
+  bindBaryTriangle('triHue',  'wHue');
   // Softness slider is inverted vs. its internal IDW exponent: slider position
   // = 13 − exponent. So high slider = mushy/soft, low = hard nearest. Keeps the
   // intuition "softness 12 means very soft" while the math stays sensible.
@@ -4073,19 +4121,15 @@ function init(){
     //   soft     → display 8 (max — gentlest IDW), exponent 3
     //   balanced → display 6 (middle),             exponent 5
     //   hard     → display 3 (Voronoi snap),       exponent 8
-    // All other params identical: globals (hueGate / lumaGuard) and anchor
-    // ranges at 0.5; preserve at 0.5; envelope fully relaxed; late stages same.
-    'soft':     { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'balanced': { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 5.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
-    'hard':     { hueGate: 0.5, lumaGuard: 0.5, lRange: 0.5, abRange: 0.5, hRange: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    // All other params identical: hueGate 0.5, preserve 0.5, envelope fully
+    // relaxed, late stages same. (Triangles aren't preset-driven.)
+    'soft':     { hueGate: 0.5, softness: 3.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    'balanced': { hueGate: 0.5, softness: 5.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
+    'hard':     { hueGate: 0.5, softness: 8.0, lPreserve: 0.5, cPreserve: 0.5, lExtLo: 1.0, lExtHi: 1.0, cExtLo: 1.0, cExtHi: 1.0, smoothness: 3, reach: 0.30, lumaLook: 0.25 },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
     chromaGate:['chromaGate','vChromaGate',v => v.toFixed(2)],
-    lRange:     ['lRange',     'vLRange',     v => v.toFixed(2)],
-    abRange:    ['abRange',    'vAbRange',    v => v.toFixed(2)],
-    hueLWeight: ['hueLWeight', 'vHueLWeight', v => v.toFixed(2)],
-    hRange:     ['hRange',     'vHRange',     v => v.toFixed(2)],
     // softness has a bespoke inverted handler — not in this map
     lPreserve:  ['lPreserve',  'vLPreserve',  v => v.toFixed(2)],
     cPreserve:  ['cPreserve',  'vCPreserve',  v => v.toFixed(2)],
@@ -4160,7 +4204,7 @@ function init(){
     // Global safety nets
     'hueGate', 'chromaGate',
     // Build params
-    'lRange', 'abRange', 'hRange', 'softness', 'hueLWeight',
+    'wLuma', 'wHue', 'softness',
     // Build-stage texel→identity blend
     'lPreserve', 'cPreserve',
     // Envelope clamp — dual-thumb floor/ceil extensions
@@ -4204,6 +4248,7 @@ function init(){
       if (sftLbl) sftLbl.textContent = sftSlider.toFixed(1);
     }
     refreshDualRanges();
+    triRedraws.forEach(fn => fn());   // redraw the L/a/b weight triangles
     // Refresh debug-stage toggles
     const toggleIds = [
       'debugEnvVizL', 'debugEnvVizC',
@@ -4286,7 +4331,6 @@ function init(){
     if (!txt) txt = window.prompt('Paste JSON preset to load:', '') || '';
     applyJsonText(txt, pasteBtn);
   });
-  bindLutSlider('hRange',         'vHRange',         'hRange',         v => v.toFixed(2));
 
   // Extend-palette controls: master toggle + 3 per-axis gap-fill thresholds.
   // Slider == 0 disables that axis. Number of inserts per gap is automatic

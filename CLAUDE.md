@@ -28,14 +28,20 @@ Hue=`atan2(lab.z, lab.y)`. Chroma absolute, not Saturation.
 **Step ownership.** step1 = interpolate anchors; step2 = restore L/C ramps
 under envelope; step3 = effects on top. Params stay in their step (audited).
 **Global tier** (top UI section, below the preset buttons, own separators —
-not step-scoped): `lutSize` + `hueGate`.
+not step-scoped): `lutSize` + `hueGate` + `chromaGate`.
 
 **Sliders.**
-- `hueGate` — GLOBAL opposing-hue safety net. Used in `FS_LUT_BUILD` (step 1)
-  AND `FS_LUT_BLUR` (step 3). `mix(-0.3,-0.97,hueGate)` cos cutoff. UI [0,1].
-- `lRange` / `abRange` — anisotropic distance weights (σL / σab). UI [0.25, 1].
-- `hRange` — Gaussian Hue gate σ (rad). UI [0.25, 1].
-- `softness` — Shepard power. UI [1, 10].
+- `hueGate` — GLOBAL opposing-hue safety net. `FS_LUT_BUILD` (step 1) AND
+  `FS_LUT_BLUR` (step 3). `mix(-0.3,-0.97,hueGate)` cos cutoff; faded off near
+  grey by a chroma-confidence ramp (no pinwheel feathering). UI [0,1], def 0.5.
+- `chromaGate` — GLOBAL near-grey desat net. `mix(smoothstep,1.0,chromaGate)`:
+  **1 = max relaxation (keep chroma)**, 0 = full desat. UI [0,1], def 0.5.
+- `wLuma` / `wHue` — two **barycentric L/C/H** anchor-distance metrics (draggable
+  triangle widgets, replace lRange/abRange/hRange). `wLuma` = WEIGHTING (luma
+  blend); `wHue` = DECOUPLING (chroma/hue blend); their separation = luma↔colour
+  decoupling. C/H via projection onto the anchor's hue axis (stable at grey, no
+  atan). Each `[wL,wC,wH]` sums to 1, clamped ≥0.06 (tinted border bar); def centroid.
+- `softness` — Shepard power. UI [1, 8].
 - `lPreserve` / `cPreserve` — texel→identity blend in `FS_LUT_BUILD` (o1),
   coherence-gated. 0=snap, 1=passthrough.
 - Envelope = dual-thumb floor/ceil **extension** per channel:
@@ -50,13 +56,14 @@ Single dispatch, **MRT** two outputs (the IDW loop runs once):
 `o0` = step-1 core, `o1` = step-2 (preserve+envelope). The `gate`
 scalar (1e) is computed once and applied to both.
 
-- 1a. Pass 1: nearest-anchor anisotropic + isotropic `d_min²`; record
-  nearest Luma/Chroma.
-- 1b. Pass 2: Shepard IDW on `d²/d_min²` w/ Gaussian Hue gate vs.
-  texel's own (a,b); accumulate weighted Lab + Chroma.
+- 1a. Pass 1: per-metric min `d²` (`dmin2L` luma, `dmin2H` colour) +
+  nearest-by-hue `nearAB`. `d²` = `dot(lchComp(L,cab,s), w)` — barycentric
+  L/C/H over (dL², dC², dH²), C/H from projection onto the anchor's hue axis.
+- 1b. Pass 2: Shepard IDW on `d²/d_min²` per metric — luma uses `uWLuma`,
+  chroma/hue uses `uWHue`. No Gaussian hue gate (dropped). Accumulate Lab+Chroma.
 - 1c. Chroma-preserving rescale → `target`, coherence-modulated.
-- gate. Safety net scalar `hueGate × chromaTrust × lumaTrust` (kills
-  opposing-Hue, fades near-grey + Luma extremes).
+- gate. Safety net `hueGate` (rotate opposing→nearest palette hue, fade by
+  chroma confidence) × `chromaGate` (near-grey desat).
 - **o0 / step 1** = `lab.x` (IDW luma), `yz = dir·target·gate`. No
   preserve, no envelope.
 - **o1 / step 2** = 1d `cPreserve` mix→identity Chroma (`finalMag`),
