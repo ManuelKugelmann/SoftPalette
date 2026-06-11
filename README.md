@@ -21,11 +21,12 @@ SoftPalette turns a handful of colors into a smooth color grade.
 - A consistent look across many images from one palette.
 - Explore how a palette feels in continuous tone.
 
-## How it works (short version)
+## How it works
 SoftPalette builds a 3D LUT and maps the image through it on the GPU. 
 Base is a soft 3D Voronoi via Shepard IDW — 
 each cell is a distance-weighted blend of the palette anchors,
 kept vivid where anchors agree on a hue and easing toward grey where they don't. 
+Additional steps adjust luma and chroma ramps, envelopes, smoothness, reach, etc.
 
 ## Controls
 The LUT params card runs top → bottom in pipeline order.
@@ -38,7 +39,7 @@ The LUT params card runs top → bottom in pipeline order.
 | hue gate | Opposing-hue safety net — curbs confidently-wrong hues |
 | chroma gate | Near-grey desaturation. 1 = keep chroma, 0 = full desat |
 
-**Step 1 — interpolate anchors.** Two draggable **L/C/H triangles** set how the
+**Step 1 — Interpolate anchors.**
 anchor blend weights luma vs chroma vs hue:
 
 | Control | What it does |
@@ -48,14 +49,14 @@ anchor blend weights luma vs chroma vs hue:
 | anchor softness | blend sharpness (low = mushy, high = near-Voronoi) |
 | blur | post-build smoothing iterations |
 
-**Step 2 — restore luma and chroma ramps, bounded by the palette envelope.** 
+**Step 2 — Restore luma and chroma ramps, bounded by the palette envelope.** 
 
 | Control | What it does |
 |---|---|
 | luma / chroma preserve | keep interpolated palette values (0) or keep identity ramp (1) |
 | luma / chroma envelope | dual-thumb limit on how far output may leave the palette's per-hue range (0 = clamp at the band, 1 = no limit) |
 
-**Step 3 — effects.**
+**Step 3 — Effects.**
 
 | Control | What it does |
 |---|---|
