@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-12T09:04:44Z">
+<meta name="build" content="2026-06-12T09:56:29Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -239,7 +239,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1><a href="https://github.com/ManuelKugelmann/SoftPalette" target="_blank" rel="noopener" style="color:#fff;text-decoration:none">SoftPalette</a> <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-12T09:04:44Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-12T09:56:29Z</span>
   </div>
 </header>
 
@@ -255,6 +255,17 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="office" title="Office-style accent colours">office</button>
       <button data-preset="nord" title="Nord — cool frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — neon highlights">dracula</button>
+    </div>
+    <!-- Cyanotype family (solarlamp.de) — Prussian-blue photographic process -->
+    <div class="row tight">
+      <button data-preset="cyanotype" title="Classic Prussian-blue cyanotype: paper-white, Prussian, deep navy">cyanotype</button>
+      <button data-preset="cyanomulti" title="multicolor.solarlamp.de — CMY-separation inks (cyan/brown-red/yellow)">cyanomulti</button>
+      <button data-preset="cyanotea" title="Tannin/tea-toned cyanotype — sepia highlight, brown mid, blue shadow">cyanotea</button>
+    </div>
+    <!-- Cyanotype duotones — strict 2-anchor light→dark splits -->
+    <div class="row tight">
+      <button data-preset="cyanosepia" title="Duotone — sepia highlight → deep blue shadow">cyanosepia</button>
+      <button data-preset="cyanored" title="Duotone — terracotta highlight → deep blue shadow">cyanored</button>
     </div>
     <!-- Quake palettes on their own full-width row (equal-width = one line) -->
     <div class="row tight full">
@@ -361,8 +372,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Block wrong-hue bleed">
       </div>
       <div class="slider" style="margin-top:6px" title="Near-grey desat safety net. 1 = max relaxation (keep chroma); 0 = full desat (keep greys grey).">
-        <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">0.50</span></div>
-        <input type="range" id="chromaGate" min="0" max="1" step="0.01" value="0.5">
+        <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">1.00</span></div>
+        <input type="range" id="chromaGate" min="0" max="1" step="0.01" value="1">
       </div>
     </div>
     <div style="margin-top:8px;border-top:1px dashed var(--bd)"></div>
@@ -521,7 +532,9 @@ const PRESETS = {
   // (#1f4a3a) sits with the cool cluster; the amber (#d4a040) sits with the
   // warm cluster. The original green-teal #3ab088 has been darkened to
   // #2a8068 so it doesn't dominate the bright half.
-  'cold-warm': ['#0a3a48','#1f4a3a','#fae060','#d5832f','#c44a2e'],
+  // + a very dark blue (cold shadow) and a near-white yellow (warm highlight)
+  // to anchor the L extremes with colored darks/brights (chromaGate=1).
+  'cold-warm': ['#02060e','#0a3a48','#1f4a3a','#fffef7','#fae060','#d5832f','#c44a2e'],
   // Merged moebius + ghibli — illustration palette: warm cream/sand, sky+navy
   // blues, rust accent, sage/teal greens. Deduplicates the two source sets.
   'moebiusGhibli': ['#e6c8a0','#e8d8a0','#7ca6c8','#a8c8e0','#3a4a78','#2c4a5a','#c46a4a','#5a8a5a','#5e8a5e'],
@@ -533,6 +546,20 @@ const PRESETS = {
   'nord':        ['#8fbcbb','#88c0d0','#81a1c1','#5e81ac','#bf616a','#d08770','#ebcb8b','#a3be8c','#b48ead'],
   // Dracula — neon highlights
   'dracula':     ['#ff79c6','#bd93f9','#8be9fd','#50fa7b','#f1fa8c','#ffb86c','#ff5555','#6272a4'],
+  // Cyanotype family (solarlamp.de — Sehera Nawaz cyanotype work + the
+  // multicolor.solarlamp.de CMY-separation simulator). Minimal anchor sets —
+  // the build interpolates the rest.
+  // All cyanotypes print on bare paper → pure white highlight anchor.
+  // classic single-ink Prussian blue: paper-white, Prussian, deep navy.
+  'cyanotype':  ['#ffffff','#235a7e','#08213a'],
+  // multicolor: the three separation inks from multicolor.solarlamp.de
+  // (cyanotype blue #10629c, brownish-red #906c55, light yellow #c8a020).
+  'cyanomulti': ['#ffffff','#10629c','#906c55','#c8a020'],
+  // tannin/tea-toned split-tone: white paper, sepia highlight, brown mid, blue shadow.
+  'cyanotea':   ['#ffffff','#f0e8d6','#9a7b58','#324c64'],
+  // Duotones — white paper + a single ink, light→dark; the build fills the ramp.
+  'cyanosepia': ['#ffffff','#e7d4ad','#173a56'],
+  'cyanored':   ['#ffffff','#dca27e','#102f49'],
   // Canonical NES (2C02) hardware palette — the ~54 distinct colors of the
   // 64-slot table, with the repeated pure-blacks collapsed to one. The SNES
   // had no fixed hardware palette (15-bit RGB), so this is the NES set.
@@ -655,9 +682,10 @@ const state = {
                            // texel's identity Hue. 0 = full gate (anti-aligned
                            // → grey), 1 = no gate. Applied in FS_LUT_BUILD (step
                            // 1) AND FS_LUT_BLUR (step 3) after the chroma rescale.
-    chromaGate: 0.5,      // GLOBAL safety net: fade near-grey texels toward grey
+    chromaGate: 1.0,      // GLOBAL safety net: fade near-grey texels toward grey
                            // (FS_LUT_BUILD + FS_LUT_BLUR). 1 = max relaxation
-                           // (keep chroma, no white/black wash); 0 = full desat.
+                           // (keep chroma → colored darks/brights, no white/black
+                           // wash); 0 = full desat. Default 1: tint neutrals.
 
     // Texel→identity-LUT blend (applied inside FS_LUT_BUILD with anchor
     // coherence gate; 0 = full LUT effect, 1 = passthrough identity).
@@ -4163,7 +4191,7 @@ function init(){
   // Every numeric knob lands at 0.5 mid; softness exponent 4.5 (slider display
   // 6.5); blur/step1 off; triangles reset to centroid by applyLutPreset.
   const lutPresets = {
-    'balanced': { lutSize: 33, hueGate: 0.5, chromaGate: 0.5, wLuma: [0.50, 0.25, 0.25], wHue: [0.20, 0.40, 0.40], softness: 4.5, step1Smoothness: 3, lPreserve: 1.0, cPreserve: 0.1, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, stampStrength: 0.5, reachL: 0.5, reachC: 0.5, lumaLook: 0, lutStrength: 1.0 },
+    'balanced': { lutSize: 33, hueGate: 0.5, chromaGate: 1.0, wLuma: [0.50, 0.25, 0.25], wHue: [0.20, 0.40, 0.40], softness: 4.5, step1Smoothness: 3, lPreserve: 1.0, cPreserve: 0.1, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, stampStrength: 0.5, reachL: 0.5, reachC: 0.5, lumaLook: 0, lutStrength: 1.0 },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
