@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-12T09:57:10Z">
+<meta name="build" content="2026-06-12T10:09:02Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -239,7 +239,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1><a href="https://github.com/ManuelKugelmann/SoftPalette" target="_blank" rel="noopener" style="color:#fff;text-decoration:none">SoftPalette</a> <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-12T09:57:10Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-12T10:09:02Z</span>
   </div>
 </header>
 
@@ -255,6 +255,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="office" title="Office-style accent colours">office</button>
       <button data-preset="nord" title="Nord — cool frost + aurora">nord</button>
       <button data-preset="dracula" title="Dracula — neon highlights">dracula</button>
+      <button data-preset="lumen" title="Lumen print — sun on unfixed silver paper: cream → pink/rose/mauve/violet → brown-violet">lumen</button>
     </div>
     <!-- Cyanotype family (solarlamp.de) — Prussian-blue photographic process -->
     <div class="row tight">
@@ -262,10 +263,11 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
       <button data-preset="cyanomulti" title="multicolor.solarlamp.de — CMY-separation inks (cyan/brown-red/yellow)">cyanomulti</button>
       <button data-preset="cyanotea" title="Tannin/tea-toned cyanotype — sepia highlight, brown mid, blue shadow">cyanotea</button>
     </div>
-    <!-- Cyanotype duotones — strict 2-anchor light→dark splits -->
+    <!-- Duotones — white paper + accent, light→dark splits -->
     <div class="row tight">
-      <button data-preset="cyanosepia" title="Duotone — sepia highlight → deep blue shadow">cyanosepia</button>
-      <button data-preset="cyanored" title="Duotone — terracotta highlight → deep blue shadow">cyanored</button>
+      <button data-preset="cyanored" title="Duotone — red/coral highlight → deep blue shadow">cyanored</button>
+      <button data-preset="cyanoyellow" title="Duotone — yellow highlight → deep blue shadow">cyanoyellow</button>
+      <button data-preset="goldbrown" title="Duotone — yellow highlight → dark brown shadow">goldbrown</button>
     </div>
     <!-- Quake palettes on their own full-width row (equal-width = one line) -->
     <div class="row tight full">
@@ -557,9 +559,14 @@ const PRESETS = {
   'cyanomulti': ['#ffffff','#10629c','#906c55','#c8a020'],
   // tannin/tea-toned split-tone: white paper, sepia highlight, brown mid, blue shadow.
   'cyanotea':   ['#ffffff','#f0e8d6','#9a7b58','#324c64'],
+  // Lumen print — sun on unfixed silver-gelatin paper. Self-toning pink/rose/
+  // magenta/mauve/violet range over a warm cream paper, into a brown-violet
+  // shadow. Multi-hue, no blue ink — the colour comes from the paper itself.
+  'lumen':      ['#f1e7d3','#e3a392','#cf7286','#9a5a82','#65588a','#7c6a4c','#2c2331'],
   // Duotones — white paper + a single ink, light→dark; the build fills the ramp.
-  'cyanosepia': ['#ffffff','#e7d4ad','#173a56'],
-  'cyanored':   ['#ffffff','#dca27e','#102f49'],
+  'cyanored':    ['#ffffff','#e07a60','#102f49'],
+  'cyanoyellow': ['#ffffff','#e8d27a','#102f49'],
+  'goldbrown':   ['#ffffff','#e8d27a','#5a3a1e'],
   // Canonical NES (2C02) hardware palette — the ~54 distinct colors of the
   // 64-slot table, with the repeated pure-blacks collapsed to one. The SNES
   // had no fixed hardware palette (15-bit RGB), so this is the NES set.
@@ -2299,7 +2306,9 @@ void main(){
     // pinwheel feathering. conf ramps 0→1 with chroma so the gate engages only
     // where the cell's hue is meaningful.
     float conf  = smoothstep(0.0, 0.10, sqrt(cellC2));
-    float shift = (1.0 - hueGateMult) * conf;   // 0 = aligned/low-chroma, 1 = opposing
+    // uHueGate = 1 fully DISABLES the gate (fade the near-opposite residual to 0).
+    float gateOn = 1.0 - smoothstep(0.85, 1.0, uHueGate);
+    float shift = (1.0 - hueGateMult) * conf * gateOn;   // 0 = aligned/low-chroma/off, 1 = opposing
     if (shift > 1e-3 && magAB > 1e-6 && dot(nearAB, nearAB) > 1e-8){
       // Rotate the output hue toward the nearest palette anchor's hue.
       float aCur = atan(dir.y, dir.x);
@@ -2496,7 +2505,8 @@ void main(){
   // Fade the gate off near the grey axis (unreliable cell hue → atan
   // singularity → pinwheel feathering); engage only where chroma is meaningful.
   float hgConf = smoothstep(0.0, 0.10, sqrt(cellC2));
-  hueGateMult  = mix(1.0, hueGateMult, hgConf);
+  float gateOn = 1.0 - smoothstep(0.85, 1.0, uHueGate);  // uHueGate = 1 → gate fully off
+  hueGateMult  = mix(1.0, hueGateMult, hgConf * gateOn);
   float chromaGate = mix(smoothstep(0.0, 0.06, sqrt(cellC2)), 1.0, uChromaGate);
   // No lumaTrust fade — keep chroma at the L extremes (no grey-out near ceil/floor).
   v.gb *= hueGateMult * chromaGate;
