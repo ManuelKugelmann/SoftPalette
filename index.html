@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="build" content="2026-06-12T10:09:35Z">
+<meta name="build" content="2026-06-12T10:10:45Z">
 <meta name="description" content="Palette-based color grading via 3D LUT: smooth-snap any image to your palette's hues with envelope-based chroma control. Single-file webgl2 tool.">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="palette · hue · lut">
@@ -239,7 +239,7 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
 <header>
   <h1><a href="https://github.com/ManuelKugelmann/SoftPalette" target="_blank" rel="noopener" style="color:#fff;text-decoration:none">SoftPalette</a> <span class="dim" style="margin-left:8px;font-weight:400">by <a href="https://www.linkedin.com/in/mkugelmann/" target="_blank" rel="noopener">Manuel Kugelmann</a> · <a href="https://bitcraft.org/" target="_blank" rel="noopener">Bitcraft IT Consulting</a></span></h1>
   <div class="meta">
-    <span style="color:var(--txd)" id="buildBadge">2026-06-12T10:09:35Z</span>
+    <span style="color:var(--txd)" id="buildBadge">2026-06-12T10:10:45Z</span>
   </div>
 </header>
 
@@ -370,8 +370,8 @@ footer{padding:8px 16px;border-top:1px solid var(--bd);font-size:10px;color:var(
         <input type="range" id="lutSize" min="0" max="3" step="1" value="1">
       </div>
       <div class="slider" style="margin-top:6px">
-        <div class="lbl"><span>hue gate</span><span class="v" id="vHueGate">0.50</span></div>
-        <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.5" title="Block wrong-hue bleed">
+        <div class="lbl"><span>hue gate</span><span class="v" id="vHueGate">0.90</span></div>
+        <input type="range" id="hueGate" min="0" max="1" step="0.01" value="0.9" title="Block wrong-hue bleed">
       </div>
       <div class="slider" style="margin-top:6px" title="Near-grey desat safety net. 1 = max relaxation (keep chroma); 0 = full desat (keep greys grey).">
         <div class="lbl"><span>chroma gate</span><span class="v" id="vChromaGate">1.00</span></div>
@@ -685,7 +685,7 @@ const state = {
     wHue:  [0.20, 0.40, 0.40],
     softness: 4.5,         // IDW power exponent (UI shows 11−exp = 6.5, "balanced").
     // GLOBAL safety nets (not step-scoped) — apply across the whole pipeline.
-    hueGate: 0.5,          // Hue-fidelity safety net. Value at 90° off the
+    hueGate: 0.9,          // Hue-fidelity safety net. Value at 90° off the
                            // texel's identity Hue. 0 = full gate (anti-aligned
                            // → grey), 1 = no gate. Applied in FS_LUT_BUILD (step
                            // 1) AND FS_LUT_BLUR (step 3) after the chroma rescale.
@@ -4201,7 +4201,7 @@ function init(){
   // Every numeric knob lands at 0.5 mid; softness exponent 4.5 (slider display
   // 6.5); blur/step1 off; triangles reset to centroid by applyLutPreset.
   const lutPresets = {
-    'balanced': { lutSize: 33, hueGate: 0.5, chromaGate: 1.0, wLuma: [0.50, 0.25, 0.25], wHue: [0.20, 0.40, 0.40], softness: 4.5, step1Smoothness: 3, lPreserve: 1.0, cPreserve: 0.1, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, stampStrength: 0.5, reachL: 0.5, reachC: 0.5, lumaLook: 0, lutStrength: 1.0 },
+    'balanced': { lutSize: 33, hueGate: 0.9, chromaGate: 1.0, wLuma: [0.50, 0.25, 0.25], wHue: [0.20, 0.40, 0.40], softness: 4.5, step1Smoothness: 3, lPreserve: 1.0, cPreserve: 0.1, lExtLo: 0.5, lExtHi: 0.5, cExtLo: 0.5, cExtHi: 0.5, smoothness: 3, stampStrength: 0.5, reachL: 0.5, reachC: 0.5, lumaLook: 0, lutStrength: 1.0 },
   };
   const sliderMap = {
     hueGate:    ['hueGate',    'vHueGate',    v => v.toFixed(2)],
